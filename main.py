@@ -132,7 +132,7 @@ def send_email(subject, message):
     msg.attach(MIMEText(message, "html"))
 
     try:
-        server = smtplib.SMTP_SSL("smtp.gmail.com", 465)
+        server = smtplib.SMTP_SSL("smtp.gmail.com", 587)
         server.login(EMAIL_SENDER, EMAIL_APP_PASSWORD)
         server.sendmail(EMAIL_SENDER, EMAIL_RECEIVER, msg.as_string())
         server.quit()
