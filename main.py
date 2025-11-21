@@ -116,7 +116,7 @@ PAYLOAD = {
     ]
 }
 
-POLL_INTERVAL_SECONDS = 500  # 5 minutes
+POLL_INTERVAL_SECONDS = 300  # 5 minutes
 
 EMAIL_SENDER = mail_sender
 EMAIL_RECEIVER = mail_receiver
