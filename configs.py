@@ -1,10 +1,5 @@
-# mail_sender = "iaaibot123@gmail.com"
-# app_pass = "94119D77C7071C0B8C0456ACBF14B39B6BD4"
-# sender_server = "smtp.elasticemail.com"
-# port = 2525
-
 mail_sender = "narekgabrielyan20@gmail.com"
-app_pass = "mvstxawqwbnxluxr"
-sender_server = "smtp.gmail.com"
-port = 587
 mail_receiver = "narek2888@mail.ru"
+sendgrid_railway_key = "SPB4KLEXFYYVHHXP24M8UPYD"
+sendgrid_api_key = "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"
+

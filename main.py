@@ -1,10 +1,9 @@
 import requests
-import smtplib
 import time
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+from sendgrid import SendGridAPIClient
+from sendgrid.helpers.mail import Mail
 from bs4 import BeautifulSoup
-from configs import mail_sender, app_pass, mail_receiver
+from configs import mail_sender, mail_receiver, sendgrid_api_key as SENDGRID_API_KEY
 
 # -------------------------
 # CONFIGURATION
@@ -116,7 +115,6 @@ POLL_INTERVAL_SECONDS = 500  # 5 minutes
 
 EMAIL_SENDER = mail_sender
 EMAIL_RECEIVER = mail_receiver
-EMAIL_APP_PASSWORD = app_pass
 
 
 # -------------------------
@@ -124,21 +122,19 @@ EMAIL_APP_PASSWORD = app_pass
 # -------------------------
 
 def send_email(subject, message):
-    msg = MIMEMultipart()
-    msg["From"] = EMAIL_SENDER
-    msg["To"] = EMAIL_RECEIVER
-    msg["Subject"] = subject
-
-    msg.attach(MIMEText(message, "html"))
+    message = Mail(
+        from_email=EMAIL_SENDER,
+        to_emails=EMAIL_RECEIVER,
+        subject=subject,
+        html_content=message
+    )
 
     try:
-        server = smtplib.SMTP_SSL("smtp.gmail.com", 587)
-        server.login(EMAIL_SENDER, EMAIL_APP_PASSWORD)
-        server.sendmail(EMAIL_SENDER, EMAIL_RECEIVER, msg.as_string())
-        server.quit()
-        print("Email sent!")
+        sg = SendGridAPIClient(SENDGRID_API_KEY)
+        response = sg.send(message)
+        print("Email sent! Status:", response.status_code)
     except Exception as e:
-        print("Email sending failed:", e)
+        print("Email failed:", e)
 
 
 # -------------------------
