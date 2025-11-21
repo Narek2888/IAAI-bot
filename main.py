@@ -1,13 +1,18 @@
 import requests
 import time
+from dotenv import load_dotenv
+import os
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
 from bs4 import BeautifulSoup
-from configs import mail_sender, mail_receiver, sendgrid_api_key as SENDGRID_API_KEY
+from configs import mail_sender, mail_receiver
 
 # -------------------------
 # CONFIGURATION
 # -------------------------
+load_dotenv()
+
+sendgrid_key = os.getenv("SENDGRID_API_KEY")
 
 API_URL = f"https://www.iaai.com/Search?c={int(time.time() * 1000)}"
 
@@ -130,7 +135,7 @@ def send_email(subject, message):
     )
 
     try:
-        sg = SendGridAPIClient(SENDGRID_API_KEY)
+        sg = SendGridAPIClient(sendgrid_key)
         response = sg.send(message)
         print("Email sent! Status:", response.status_code)
     except Exception as e:
