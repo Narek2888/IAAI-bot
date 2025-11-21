@@ -137,6 +137,7 @@ def send_email(subject, message):
     try:
         sg = SendGridAPIClient(api_key=os.getenv("SENDGRID_API_KEY"))
         response = sg.send(message)
+        print("key:", os.getenv("SENDGRID_API_KEY"))
         print("Email sent! Status:", response.status_code)
     except Exception as e:
         print("Email failed:", e)
