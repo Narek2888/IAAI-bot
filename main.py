@@ -1,11 +1,12 @@
+import os
 import requests
 import time
 from dotenv import load_dotenv
-import os
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
 from bs4 import BeautifulSoup
-from configs import mail_sender, mail_receiver
+from configs import mail_sender as EMAIL_SENDER
+from configs import mail_receiver as EMAIL_RECEIVER
 
 # -------------------------
 # CONFIGURATION
@@ -116,38 +117,40 @@ PAYLOAD = {
     ]
 }
 
-POLL_INTERVAL_SECONDS = 300  # 5 minutes
-
-EMAIL_SENDER = mail_sender
-EMAIL_RECEIVER = mail_receiver
-
+POLL_INTERVAL_SECONDS = 600  # 10 minutes
 
 # -------------------------
 # EMAIL SENDER
 # -------------------------
 
-def send_email(subject, message):
-    message = Mail(
+def send_email(subject, body):
+    email_message = Mail(
         from_email=EMAIL_SENDER,
-        to_emails=EMAIL_RECEIVER,
+        to_emails= EMAIL_SENDER,
         subject=subject,
-        html_content=message
+        html_content=body
     )
 
+    api_key = sendgrid_key
+    if not api_key:
+        raise ValueError("SENDGRID_API_KEY is not set!")
+
     try:
-        sg = SendGridAPIClient(api_key=os.getenv("SENDGRID_API_KEY"))
-        response = sg.send(message)
-        print("key:", os.getenv("SENDGRID_API_KEY"))
+        sg = SendGridAPIClient(api_key)
+        response = sg.send(email_message)
         print("Email sent! Status:", response.status_code)
     except Exception as e:
         print("Email failed:", e)
+        if hasattr(e, "body"):
+            print(e.body)
+
 
 
 # -------------------------
 # IAAI CHECK + STOCK PARSING
 # -------------------------
 
-def extract_stock_numbers(html):
+def scrap_car_info(html):
     """
     Extracts Stock ID (from 'name' attribute) as key and Absolute URL as value 
     from <a> tags nested within <h4> tags.
@@ -190,7 +193,7 @@ def check_iaai():
 
         print("Received HTML:", len(html), "bytes")
 
-        stocks = extract_stock_numbers(html)
+        stocks = scrap_car_info(html)
 
         return stocks
 
@@ -206,53 +209,86 @@ def check_iaai():
 def start_bot():
     print("IAAI Stock Checker started... polling every", POLL_INTERVAL_SECONDS, "seconds.")
 
-    # last_seen now stores the stock IDs (keys) of previously seen vehicles
-    last_seen_ids = set() 
+    # Store all seen stocks and their prices: { "STOCK_ID": "PRICE" }
+    known_stocks = {}
 
     while True:
-        # 'current_stocks' is a dictionary: {stock_id: absolute_url}
         current_stocks = check_iaai()
 
         if not current_stocks:
-            print("No vehicle listings found in response! (Might be blocked or zero results)")
-        else:
-            print(f"Found {len(current_stocks)} total listings.")
-        
-        # Determine new listings by comparing current keys to last_seen_ids
-        new_stocks = []
+            print("No vehicle listings found in response!")
+            time.sleep(POLL_INTERVAL_SECONDS)
+            continue
 
+        print(f"Found {len(current_stocks)} total listings.")
+
+        new_listings = []
+        price_changes = []
+
+        # LOOP THROUGH CURRENT STOCK LIST
         for item in current_stocks:
             stock_id = item["stock_id"]
+            price = item["price"]
 
-            if stock_id not in last_seen_ids:
-                new_stocks.append(item)
-        
-        # Only add new IDs to last_seen_ids once they are processed for the email
-        last_seen_ids.update([item["stock_id"] for item in new_stocks])
+            # ============================
+            #  NEW STOCK
+            # ============================
+            if stock_id not in known_stocks:
+                new_listings.append(item)
+                known_stocks[stock_id] = price
+                continue
 
+            # ============================
+            #  PRICE CHANGE
+            # ============================
+            old_price = known_stocks[stock_id]
+            if price < old_price:
+                price_changes.append({
+                    **item,
+                    "old_price": old_price
+                })
+                known_stocks[stock_id] = price
 
+        # ----------------------------------
+        # SEND EMAIL: NEW LISTINGS
+        # ----------------------------------
+        if new_listings:
+            message = ["<h2>🚗 New Listings Found</h2><br>"]
 
-        if new_stocks:
-          message_lines = ["New listings found:\n"]
+            for item in new_listings:
+                message.append(
+                    f"<b>Stock ID:</b> {item['stock_id']}<br>"
+                    f"<b>Price:</b> {item['price']}<br>"
+                    f"<b>Link:</b> <a href='{item['vehicle_link']}'>{item['vehicle_link']}</a><br>"
+                    f"{item['image']}<br><br>"
+                )
 
-          for item in new_stocks:
-              message_lines.append(
-                  f"Stock ID: {item['stock_id']}\n"
-                  f"Price: {item['price']}\n"
-                  f"Link: {item['vehicle_link']}\n"
-                  f"Image: {item['image']}\n"
-              )
+            send_email(
+                subject=f"🚗 New IAAI Tesla Listings ({len(new_listings)})",
+                body="".join(message)
+            )
 
-          email_message = "\n".join(message_lines)
+        # ----------------------------------
+        # SEND EMAIL: PRICE CHANGES
+        # ----------------------------------
+        if price_changes:
+            message = ["<h2>💰 Price Change Detected</h2><br>"]
 
-          send_email(
-              subject=f"🚗 New IAAI Tesla Model 3 Listings ({len(new_stocks)})",
-              message=email_message
-          )
-        else:
-            print("No new listings found since last check.")
+            for item in price_changes:
+                message.append(
+                    f"<b>Stock ID:</b> {item['stock_id']}<br>"
+                    f"<b>Old Price:</b> {item['old_price']}<br>"
+                    f"<b>New Price:</b> {item['price']}<br>"
+                    f"<b>Link:</b> <a href='{item['vehicle_link']}'>{item['vehicle_link']}</a><br>"
+                    f"{item['image']}<br><br>"
+                )
 
-        print(f"\nSleeping for {POLL_INTERVAL_SECONDS} seconds...")
+            send_email(
+                subject=f"💰 Price Changed ({len(price_changes)})",
+                body="".join(message)
+            )
+
+        print(f"Sleeping for {POLL_INTERVAL_SECONDS} seconds...\n")
         time.sleep(POLL_INTERVAL_SECONDS)
 
 
