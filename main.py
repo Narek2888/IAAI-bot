@@ -7,116 +7,15 @@ from sendgrid.helpers.mail import Mail
 from bs4 import BeautifulSoup
 from configs import mail_sender as EMAIL_SENDER
 from configs import mail_receiver as EMAIL_RECEIVER
+from request_data import BASE_URL, API_URL, HEADERS, PAYLOAD
 
-# -------------------------
-# CONFIGURATION
-# -------------------------
+# Load environment variables from .env file
 load_dotenv()
 
+# SendGrid API Key from environment variable
 sendgrid_key = os.getenv("SENDGRID_API_KEY")
 
-API_URL = f"https://www.iaai.com/Search?c={int(time.time() * 1000)}"
-
-HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Accept': 'application/json, text/plain, */*',
-    'Accept-Language': 'en-US,en;q=0.9',
-    'Content-Type': 'application/json',
-    # Referer is sometimes checked to ensure the request is coming from their own site
-    'Referer': 'https://www.iaai.com/advanced-search' 
-}
-
-PAYLOAD = {
-    "Searches": [
-        {
-            "Facets": [
-                {
-                    "Group": "AuctionType",
-                    "Value": "Buy Now"
-                }
-            ],
-            "FullSearch": None,
-            "LongRanges": None
-        },
-        {
-            "Facets": [
-                {
-                    "Group": "FuelTypeDesc",
-                    "Value": "Electric"
-                }
-            ],
-            "FullSearch": None,
-            "LongRanges": None
-        },
-        {
-            "Facets": [
-                {
-                    "Group": "Make",
-                    "Value": "TESLA"
-                }
-            ],
-            "FullSearch": None,
-            "LongRanges": None
-        },
-        {
-            "Facets": [
-                {
-                    "Group": "Model",
-                    "Value": "MODEL 3"
-                }
-            ],
-            "FullSearch": None,
-            "LongRanges": None
-        },
-        {
-            "Facets": None,
-            "FullSearch": None,
-            "LongRanges": [
-                {
-                    "From": 2021,
-                    "Name": "Year",
-                    "To": 2026
-                }
-            ]
-        },
-        {
-            "Facets": None,
-            "FullSearch": None,
-            "LongRanges": [
-                {
-                    "From": 0,
-                    "Name": "MinimumBidAmount",
-                    "To": 5500
-                }
-            ]
-        }
-    ],
-    "ZipCode": "",
-    "miles": 0,
-    "PageSize": 100,
-    "CurrentPage": 1,
-    "Sort": [
-        {
-            "IsGeoSort": False,
-            "SortField": "AuctionDateTime",
-            "IsDescending": False
-        }
-    ],
-    "ShowRecommendations": False,
-    "SaleStatusFilters": [
-        {
-            "SaleStatus": 1,
-            "IsSelected": True
-        }
-    ],
-    "BidStatusFilters": [
-        {
-            "BidStatus": 6,
-            "IsSelected": True
-        }
-    ]
-}
-
+# Time between each poll to the IAAI API
 POLL_INTERVAL_SECONDS = 600  # 10 minutes
 
 # -------------------------
@@ -145,9 +44,8 @@ def send_email(subject, body):
             print(e.body)
 
 
-
 # -------------------------
-# IAAI CHECK + STOCK PARSING
+# IAAI CHECK + DATA PARSING
 # -------------------------
 
 def scrap_car_info(html):
@@ -168,7 +66,6 @@ def scrap_car_info(html):
         title=lambda x: x and "Stock" in x
     )
     
-    BASE_URL = "https://www.iaai.com"
 
     for data, span in zip(vehicle_links, stock_spans):
         # Extract the attributes:
