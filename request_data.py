@@ -30,7 +30,8 @@ PAYLOAD = {
             "Facets": [
                 {
                     "Group": "AuctionType",
-                    "Value": "Buy Now"
+                    "Value": "Buy Now",
+                    "ForAnalytics": False
                 }
             ],
             "FullSearch": None,
@@ -62,17 +63,8 @@ PAYLOAD = {
             "Facets": [
                 {
                     "Group": "InventoryTypes",
-                    "Value": "Automobiles"
-                }
-            ],
-            "FullSearch": None,
-            "LongRanges": None
-        },
-        {
-            "Facets": [
-                {
-                    "Group": "InventoryTypes",
-                    "Value": "Motorcycles"
+                    "Value": "Automobiles",
+                    "ForAnalytics": False
                 }
             ],
             "FullSearch": None,
@@ -86,7 +78,7 @@ PAYLOAD = {
     "Sort": [
         {
             "IsGeoSort": False,
-            "SortField": "AuctionDateTime",
+            "SortField": "TenantSortOrder",
             "IsDescending": False
         }
     ],
