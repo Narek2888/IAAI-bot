@@ -99,9 +99,9 @@ def check_iaai():
         return []
 
 
-# -------------------------
+# ------------------------
 # MAIN LOOP
-# -------------------------
+# ------------------------
 
 def start_bot():
     print("IAAI Stock Checker started... polling every", POLL_INTERVAL_SECONDS, "seconds.")
