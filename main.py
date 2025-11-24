@@ -106,7 +106,7 @@ def check_iaai():
 def start_bot():
     print("IAAI Stock Checker started... polling every", POLL_INTERVAL_SECONDS, "seconds.")
 
-    # Store all seen stocks and their prices: { "STOCK_ID": "PRICE" }
+    # Store full items indexed by stock_id
     known_stocks = {}
 
     while True:
@@ -122,36 +122,31 @@ def start_bot():
         new_listings = []
         price_changes = []
 
-        # LOOP THROUGH CURRENT STOCK LIST
         for item in current_stocks:
             stock_id = item["stock_id"]
             price = item["price"]
 
-            # ============================
-            #  NEW STOCK
-            # ============================
+            # NEW STOCK
             if stock_id not in known_stocks:
                 new_listings.append(item)
-                known_stocks[stock_id] = price
+                known_stocks[stock_id] = item       # <-- store full dict
                 continue
 
-            # ============================
-            #  PRICE CHANGE
-            # ============================
-            old_price = known_stocks[stock_id]
+            # PRICE CHANGE
+            old_price = known_stocks[stock_id]["price"]
+
             if price < old_price:
                 price_changes.append({
                     **item,
                     "old_price": old_price
                 })
-                known_stocks[stock_id] = price
 
-        # ----------------------------------
+            # Always update stored full item
+            known_stocks[stock_id] = item           # <-- store full dict
+
         # SEND EMAIL: NEW LISTINGS
-        # ----------------------------------
         if new_listings:
             message = ["<h2>🚗 New Listings Found</h2><br>"]
-
             for item in new_listings:
                 message.append(
                     f"<b>Stock ID:</b> {item['stock_id']}<br>"
@@ -159,18 +154,14 @@ def start_bot():
                     f"<b>Link:</b> <a href='{item['vehicle_link']}'>{item['vehicle_link']}</a><br>"
                     f"{item['image']}<br><br>"
                 )
-
             send_email(
                 subject=f"🚗 New IAAI Tesla Listings ({len(new_listings)})",
                 body="".join(message)
             )
 
-        # ----------------------------------
         # SEND EMAIL: PRICE CHANGES
-        # ----------------------------------
         if price_changes:
             message = ["<h2>💰 Price Change Detected</h2><br>"]
-
             for item in price_changes:
                 message.append(
                     f"<b>Stock ID:</b> {item['stock_id']}<br>"
@@ -179,7 +170,6 @@ def start_bot():
                     f"<b>Link:</b> <a href='{item['vehicle_link']}'>{item['vehicle_link']}</a><br>"
                     f"{item['image']}<br><br>"
                 )
-
             send_email(
                 subject=f"💰 Price Changed ({len(price_changes)})",
                 body="".join(message)
@@ -187,6 +177,7 @@ def start_bot():
 
         print(f"Sleeping for {POLL_INTERVAL_SECONDS} seconds...\n")
         time.sleep(POLL_INTERVAL_SECONDS)
+
 
 
 if __name__ == "__main__":
