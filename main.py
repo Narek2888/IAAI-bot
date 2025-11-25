@@ -157,7 +157,7 @@ def start_bot():
             send_email(
                 subject=f"🚗 New IAAI Tesla Listings ({len(new_listings)})",
                 body="".join(message)
-            )
+                )
 
         # SEND EMAIL: PRICE CHANGES
         if price_changes:
@@ -173,7 +173,7 @@ def start_bot():
             send_email(
                 subject=f"💰 Price Changed ({len(price_changes)})",
                 body="".join(message)
-            )
+                )
 
         print(f"Sleeping for {POLL_INTERVAL_SECONDS} seconds...\n")
         time.sleep(POLL_INTERVAL_SECONDS)
