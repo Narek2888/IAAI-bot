@@ -12,7 +12,7 @@ from request_data import BASE_URL, API_URL, HEADERS, PAYLOAD
 # Load environment variables from .env file
 load_dotenv()
 
-# SendGrid API Key from environment variable
+# SendGrid API key from environment variable
 sendgrid_key = os.getenv("SENDGRID_API_KEY")
 
 # Time between each poll to the IAAI API
