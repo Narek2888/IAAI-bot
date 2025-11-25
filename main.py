@@ -25,7 +25,7 @@ POLL_INTERVAL_SECONDS = 600  # 10 minutes
 def send_email(subject, body):
     email_message = Mail(
         from_email=EMAIL_SENDER,
-        to_emails= EMAIL_SENDER,
+        to_emails= EMAIL_RECEIVER,
         subject=subject,
         html_content=body
     )
