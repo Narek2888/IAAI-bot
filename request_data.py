@@ -9,7 +9,7 @@ HEADERS = {
     'Accept': 'application/json, text/plain, */*',
     'Accept-Language': 'en-US,en;q=0.9',
     'Content-Type': 'application/json',
-    # Referer is sometimes checked to ensure the request is coming from their own site
+    # Referer is sometimes checked to ensure the request is coming from their own site.
     'Referer': 'https://www.iaai.com/advanced-search' 
 }
 
