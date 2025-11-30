@@ -5,51 +5,61 @@ import os
 
 # Add parent folder to path for importing main.py
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
 from main import IAAIBot
 
-st.set_page_config(page_title="IAAI Tesla Stock Checker", layout="wide")
-st.title("🚗 IAAI Tesla Stock Checker")
+st.set_page_config(page_title="IAAI Stock Checker", layout="wide")
+st.title("🚗 IAAI Stock Checker")
 
+# ----------------------------------------------------------------------
+# Session State Initialization
+# ----------------------------------------------------------------------
+if "active_payload" not in st.session_state:
+    st.session_state.active_payload = None
+
+if "bot" not in st.session_state:
+    st.session_state.bot = IAAIBot(payload=None)
+
+bot = st.session_state.bot
+
+
+# ----------------------------------------------------------------------
 # Sidebar filters
+# ----------------------------------------------------------------------
 st.sidebar.header("Filters")
+st.sidebar.subheader("Year Range")
 
-# Year Range
-year_range = st.sidebar.slider("Year Range", 2000, 2026, (2020, 2026))
+year_from = st.sidebar.number_input("From Year", min_value=1900, max_value=2030, value=2020, step=1)
+year_to   = st.sidebar.number_input("To Year",   min_value=1900, max_value=2030, value=2026, step=1)
 
-# Auction Type
+if year_to < year_from:
+    st.sidebar.error("❌ 'To Year' must be greater than or equal to 'From Year'")
+
 auction_type = st.sidebar.selectbox("Auction Type", ["Buy Now", "Standard", "Online Only"])
-
-# Maximum Bid Amount
-max_bid = st.sidebar.number_input("Maximum Bid Amount ($)", min_value=0, max_value=100000, value=1500)
-
-# Maximum Mileage (ODO)
-odo_max = st.sidebar.number_input("Maximum Mileage (ODO)", min_value=0, max_value=500000, value=50000)
-
-# Inventory Type
+max_bid      = st.sidebar.number_input("Maximum Bid ($)", min_value=0, max_value=100000, value=1500)
+odo_max      = st.sidebar.number_input("Maximum Mileage (ODO)", min_value=0, max_value=500000, value=50000)
 inventory_type = st.sidebar.selectbox("Inventory Type", ["Automobiles", "Trucks", "Motorcycles"])
 
-# Initialize bot
-bot = IAAIBot()
+apply_filters = st.sidebar.button("✔️ Apply Filters")
 
-# Mode selection
-mode = st.radio("Select mode:", ["Run Once", "Continuous Monitoring"])
 
-# Placeholder for results table
-results_placeholder = st.empty()
-
-# Function to build PAYLOAD dynamically
+# ----------------------------------------------------------------------
+# Payload Builder
+# ----------------------------------------------------------------------
 def build_payload():
-    payload = {
+    return {
         "Searches": [
             {"Facets": None, "FullSearch": None,
-             "LongRanges": [{"From": year_range[0], "Name": "Year", "To": year_range[1]}]},
+             "LongRanges": [{"From": year_from, "Name": "Year", "To": year_to}]},
+
             {"Facets": [{"Group": "AuctionType", "Value": auction_type, "ForAnalytics": False}],
              "FullSearch": None, "LongRanges": None},
+
             {"Facets": None, "FullSearch": None,
              "LongRanges": [{"From": 0, "Name": "MinimumBidAmount", "To": max_bid}]},
+
             {"Facets": None, "FullSearch": None,
              "LongRanges": [{"From": 0, "Name": "ODOValue", "To": odo_max}]},
+
             {"Facets": [{"Group": "InventoryTypes", "Value": inventory_type, "ForAnalytics": False}],
              "FullSearch": None, "LongRanges": None},
         ],
@@ -58,49 +68,76 @@ def build_payload():
         "Sort": [{"IsGeoSort": False, "SortField": "TenantSortOrder", "IsDescending": False}],
         "ShowRecommendations": False,
     }
-    return payload
 
-# Build the payload dynamically from the filters
-payload = build_payload()
 
-# Inject into bot
-bot = IAAIBot(payload)
+# ----------------------------------------------------------------------
+# Apply Filters Button Logic
+# ----------------------------------------------------------------------
+if apply_filters:
+    st.session_state.active_payload = build_payload()
+    bot.PAYLOAD = st.session_state.active_payload
+    st.sidebar.success("Filters applied successfully!")
 
-# Function to display results in table
+
+# ----------------------------------------------------------------------
+# UI — Mode Selection
+# ----------------------------------------------------------------------
+mode = st.radio("Select Mode", ["Run Once", "Continuous Monitoring"])
+
+results_placeholder = st.empty()
+
+
 def display_results(data):
     if not data:
         results_placeholder.warning("No listings found.")
         return
 
-    # Convert list of dicts to DataFrame for display
     df = pd.DataFrame(data)
-    # Render images as HTML
     df['image'] = df['image'].apply(lambda x: x)
     results_placeholder.write(df.to_html(escape=False), unsafe_allow_html=True)
 
-# Run Once mode
+
+# ----------------------------------------------------------------------
+# RUN ONCE MODE
+# ----------------------------------------------------------------------
 if mode == "Run Once":
     if st.button("Run Check Now"):
-        st.info("Running IAAI check...")
-        bot.PAYLOAD = build_payload()  # Inject current filters
-        result = bot.run_once()
-        st.success("Check Complete!")
-        st.code(result)
+        if st.session_state.active_payload is None:
+            st.error("❗ Please apply filters first")
+        else:
+            bot.PAYLOAD = st.session_state.active_payload
+            st.info("Running IAAI check...")
+            result = bot.run_once()
+            st.success("Check Complete!")
+            st.code(result)
 
-# Continuous Monitoring mode
+
+# ----------------------------------------------------------------------
+# CONTINUOUS MONITORING MODE
+# ----------------------------------------------------------------------
 else:
     col1, col2 = st.columns(2)
+
     with col1:
         if st.button("Start Continuous Monitoring"):
-            bot.PAYLOAD = build_payload()  # Inject filters
-            message = bot.start_continuous()
-            st.success(message)
+            if st.session_state.active_payload is None:
+                st.error("❗ Please apply filters first")
+            else:
+                bot.PAYLOAD = st.session_state.active_payload
+
+                # Prevent duplicate threads
+                if bot.thread and bot.thread.is_alive():
+                    st.warning("Monitoring is already running.")
+                else:
+                    msg = bot.start_continuous()
+                    st.success(msg)
+
     with col2:
         if st.button("Stop Continuous Monitoring"):
-            message = bot.stop_continuous()
-            st.warning(message)
+            msg = bot.stop_continuous()
+            st.warning(msg)
 
-    st.info("Continuous monitoring runs in the background. Check console/logs for updates.")
+    st.info("Continuous monitoring runs in the background on the server.")
 
 bot.PAYLOAD = build_payload()  # update filters
 bot.start_continuous()

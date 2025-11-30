@@ -107,7 +107,7 @@ class IAAIBot:
                 f"{item['image']}<br><br>"
                 for item in new_listings
             ])
-            results.append(send_email(f"🚗 New IAAI Tesla Listings ({len(new_listings)})", body))
+            results.append(send_email(f"🚗 IAAI New Listings ({len(new_listings)})", body))
 
         if price_changes:
             body = "".join([
@@ -141,6 +141,6 @@ class IAAIBot:
             print(result)
             time.sleep(POLL_INTERVAL_SECONDS)
 
-            
+
 if __name__ == "__main__":
     bot = IAAIBot()
