@@ -138,6 +138,3 @@ else:
             st.warning(msg)
 
     st.info("Continuous monitoring runs in the background on the server.")
-
-bot.PAYLOAD = build_payload()  # update filters
-bot.start_continuous()
