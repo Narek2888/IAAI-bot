@@ -28,16 +28,16 @@ bot = st.session_state.bot
 st.sidebar.header("Filters")
 st.sidebar.subheader("Year Range")
 
-year_from = st.sidebar.number_input("From Year", min_value=1900, max_value=2030, value=2020, step=1)
-year_to   = st.sidebar.number_input("To Year",   min_value=1900, max_value=2030, value=2026, step=1)
+year_from = st.sidebar.number_input("From Year", min_value=1900, max_value=2030, step=1)
+year_to   = st.sidebar.number_input("To Year",   min_value=1900, max_value=2030, step=1)
 
 if year_to < year_from:
     st.sidebar.error("❌ 'To Year' must be greater than or equal to 'From Year'")
 
-auction_type = st.sidebar.selectbox("Auction Type", ["Buy Now", "Standard", "Online Only"])
-max_bid      = st.sidebar.number_input("Maximum Bid ($)", min_value=0, max_value=100000, value=1500)
-odo_max      = st.sidebar.number_input("Maximum Mileage (ODO)", min_value=0, max_value=500000, value=50000)
-inventory_type = st.sidebar.selectbox("Inventory Type", ["Automobiles", "Trucks", "Motorcycles"])
+auction_type = st.sidebar.selectbox("Auction Type", ["Buy Now"])
+max_bid      = st.sidebar.number_input("Maximum Bid ($)", min_value=0, max_value=100000)
+odo_max      = st.sidebar.number_input("Maximum Mileage (ODO)", min_value=0, max_value=500000)
+inventory_type = st.sidebar.selectbox("Inventory Type", ["Automobiles", "Motorcycles"])
 
 apply_filters = st.sidebar.button("✔️ Apply Filters")
 
