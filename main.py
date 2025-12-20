@@ -7,7 +7,7 @@ from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
 from dotenv import load_dotenv
 from configs import mail_sender as EMAIL_SENDER
-from configs import mail_receiver as EMAIL_RECEIVER
+from user_service import get_user_email, user_exists
 from request_data import BASE_URL, API_URL, HEADERS
 
 load_dotenv()
@@ -15,20 +15,25 @@ SENDGRID_KEY = os.getenv("SENDGRID_API_KEY")
 POLL_INTERVAL_SECONDS = 600  # 10 minutes
 
 
-def send_email(subject, body):
+def send_email(user_id: int, subject: str, body: str):
     if not SENDGRID_KEY:
         raise ValueError("SENDGRID_API_KEY is not set!")
 
+    receiver_email = get_user_email(user_id)
+    if not receiver_email:
+        return "Email not sent: user email not found"
+
     message = Mail(
         from_email=EMAIL_SENDER,
-        to_emails=EMAIL_RECEIVER,
+        to_emails=receiver_email,
         subject=subject,
         html_content=body
     )
+
     try:
         sg = SendGridAPIClient(SENDGRID_KEY)
         response = sg.send(message)
-        return f"Email sent! Status: {response.status_code}"
+        return f"Email sent to {receiver_email} (Status {response.status_code})"
     except Exception as e:
         return f"Email failed: {e}"
 
@@ -64,7 +69,8 @@ def check_iaai(payload):
 
 
 class IAAIBot:
-    def __init__(self, payload=None):
+    def __init__(self, user_id: int, payload=None):
+        self.user_id = user_id
         self.known_stocks = {}
         self.continuous_mode = False
         self.thread = None
@@ -107,7 +113,7 @@ class IAAIBot:
                 f"{item['image']}<br><br>"
                 for item in new_listings
             ])
-            results.append(send_email(f"🚗 IAAI New Listings ({len(new_listings)})", body))
+            results.append(send_email(self.user_id,f"🚗 IAAI New Listings ({len(new_listings)})",body))
 
         if price_changes:
             body = "".join([
@@ -118,7 +124,7 @@ class IAAIBot:
                 f"{item['image']}<br><br>"
                 for item in price_changes
             ])
-            results.append(send_email(f"💰 Price Changed ({len(price_changes)})", body))
+            results.append(send_email(self.user_id, f"💰 Price Changed ({len(price_changes)})", body))
 
         return "\n".join(results) if results else "No new updates."
 
@@ -137,8 +143,20 @@ class IAAIBot:
 
     def _continuous_loop(self):
         while self.continuous_mode:
-            result = self.run_once()
+            # Stop if user deleted
+            if not user_exists(self.user_id):
+                print(f"User {self.user_id} deleted. Stopping continuous monitoring.")
+                self.continuous_mode = False
+                break
+            elif not get_user_email(self.user_id):
+                print(f"User {self.user_id} has no email. Stopping continuous monitoring.")
+                self.continuous_mode = False
+                break
+
+            # Run normal monitoring logic
+            result = self.run_once()  # Or fetch_new_listings/send_email logic
             print(result)
+
             time.sleep(POLL_INTERVAL_SECONDS)
 
 
