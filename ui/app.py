@@ -35,8 +35,9 @@ if year_to < year_from:
     st.sidebar.error("❌ 'To Year' must be greater than or equal to 'From Year'")
 
 auction_type = st.sidebar.selectbox("Auction Type", ["Buy Now"])
-max_bid      = st.sidebar.number_input("Maximum Bid ($)", min_value=0, max_value=100000)
-odo_max      = st.sidebar.number_input("Maximum Mileage (ODO)", min_value=0, max_value=500000)
+min_bid = st.sidebar.number_input("Minimum Bid ($)", min_value=0, max_value=100000)
+max_bid = st.sidebar.number_input("Maximum Bid ($)", min_value=0, max_value=100000)
+odo_max = st.sidebar.number_input("Maximum Mileage (ODO)", min_value=0, max_value=500000)
 inventory_type = st.sidebar.selectbox("Inventory Type", ["Automobiles", "Motorcycles"])
 
 apply_filters = st.sidebar.button("✔️ Apply Filters")
@@ -55,7 +56,7 @@ def build_payload():
              "FullSearch": None, "LongRanges": None},
 
             {"Facets": None, "FullSearch": None,
-             "LongRanges": [{"From": 0, "Name": "MinimumBidAmount", "To": max_bid}]},
+             "LongRanges": [{"From": min_bid, "Name": "MinimumBidAmount", "To": max_bid}]},
 
             {"Facets": None, "FullSearch": None,
              "LongRanges": [{"From": 0, "Name": "ODOValue", "To": odo_max}]},
