@@ -49,7 +49,7 @@ if st.session_state.user_id is None:
                     st.session_state.user_id = user_id
                     st.session_state.bot = IAAIBot(user_id=user_id)
                     st.sidebar.success(f"{msg} — Logged in automatically")
-                    st.experimental_rerun()
+                    st.rerun()
                 else:
                     st.sidebar.error("Account created, but failed to log in automatically")
             else:
@@ -61,7 +61,7 @@ if st.session_state.user_id is None:
                 st.session_state.user_id = user_id
                 st.session_state.bot = IAAIBot(user_id=user_id)
                 st.sidebar.success("Logged in")
-                st.experimental_rerun()
+                st.rerun()
             else:
                 st.sidebar.error("Invalid credentials")
 
@@ -71,7 +71,7 @@ else:
         st.session_state.user_id = None
         st.session_state.active_payload = None
         st.session_state.bot = None
-        st.experimental_rerun()
+        st.rerun()
 
     # Delete user
     confirm_delete = st.sidebar.checkbox("Yes, I want to delete my account permanently")
@@ -81,7 +81,7 @@ else:
             st.session_state.active_payload = None
             st.session_state.bot = None
             st.sidebar.success("Account deleted successfully.")
-            st.experimental_rerun()
+            st.rerun()
         else:
             st.sidebar.error("Failed to delete account.")
 
