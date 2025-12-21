@@ -69,7 +69,9 @@ def check_iaai(payload):
 
 
 class IAAIBot:
-    def __init__(self, user_id: int, payload=None):
+    def __init__(self, user_id: int=None, payload=None):
+        if user_id is None:
+            raise ValueError("user_id must be provided")
         self.user_id = user_id
         self.known_stocks = {}
         self.continuous_mode = False
