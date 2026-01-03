@@ -1,0 +1,20 @@
+# Railway (Nixpacks) build for a Node monorepo (root backend + Vite frontend)
+# - Installs root deps
+# - Installs frontend deps and builds to frontend/dist
+# - Starts backend via `npm start`
+
+[phases.setup]
+# Needed for native deps like better-sqlite3 on Linux
+nixPkgs = ["python3", "gcc", "gnumake"]
+
+[phases.install]
+cmds = [
+  "npm ci --omit=dev || npm install --omit=dev",
+  "npm --prefix frontend ci || npm --prefix frontend install"
+]
+
+[phases.build]
+cmds = ["npm --prefix frontend run build"]
+
+[start]
+cmd = "npm start"
