@@ -32,6 +32,11 @@ export default function App() {
     newPassword: "",
     confirmPassword: "",
   });
+  const [showPw, setShowPw] = useState({
+    current: false,
+    next: false,
+    confirm: false,
+  });
 
   useEffect(() => {
     const token = loadTokenFromStorage();
@@ -97,6 +102,7 @@ export default function App() {
 
     alert("Password changed");
     setPwForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+    setShowPw({ current: false, next: false, confirm: false });
     setShowChangePassword(false);
   };
 
@@ -129,30 +135,119 @@ export default function App() {
 
       {showChangePassword && (
         <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
-          <input
-            placeholder="Current password"
-            type="password"
-            value={pwForm.currentPassword}
-            onChange={(e) =>
-              setPwForm((p) => ({ ...p, currentPassword: e.target.value }))
-            }
-          />
-          <input
-            placeholder="New password"
-            type="password"
-            value={pwForm.newPassword}
-            onChange={(e) =>
-              setPwForm((p) => ({ ...p, newPassword: e.target.value }))
-            }
-          />
-          <input
-            placeholder="Confirm new password"
-            type="password"
-            value={pwForm.confirmPassword}
-            onChange={(e) =>
-              setPwForm((p) => ({ ...p, confirmPassword: e.target.value }))
-            }
-          />
+          <div style={{ position: "relative", display: "inline-block" }}>
+            <input
+              placeholder="Current password"
+              type={showPw.current ? "text" : "password"}
+              value={pwForm.currentPassword}
+              onChange={(e) =>
+                setPwForm((p) => ({ ...p, currentPassword: e.target.value }))
+              }
+              style={{ paddingRight: 44 }}
+            />
+            <button
+              type="button"
+              onClick={() => setShowPw((p) => ({ ...p, current: !p.current }))}
+              aria-label={
+                showPw.current
+                  ? "Hide current password"
+                  : "Show current password"
+              }
+              title={
+                showPw.current
+                  ? "Hide current password"
+                  : "Show current password"
+              }
+              style={{
+                position: "absolute",
+                right: 8,
+                top: "50%",
+                transform: "translateY(-50%)",
+                border: "none",
+                background: "transparent",
+                cursor: "pointer",
+                padding: 6,
+                lineHeight: 1,
+                fontSize: 16,
+              }}
+            >
+              {showPw.current ? "🙈" : "👁️"}
+            </button>
+          </div>
+
+          <div style={{ position: "relative", display: "inline-block" }}>
+            <input
+              placeholder="New password"
+              type={showPw.next ? "text" : "password"}
+              value={pwForm.newPassword}
+              onChange={(e) =>
+                setPwForm((p) => ({ ...p, newPassword: e.target.value }))
+              }
+              style={{ paddingRight: 44 }}
+            />
+            <button
+              type="button"
+              onClick={() => setShowPw((p) => ({ ...p, next: !p.next }))}
+              aria-label={
+                showPw.next ? "Hide new password" : "Show new password"
+              }
+              title={showPw.next ? "Hide new password" : "Show new password"}
+              style={{
+                position: "absolute",
+                right: 8,
+                top: "50%",
+                transform: "translateY(-50%)",
+                border: "none",
+                background: "transparent",
+                cursor: "pointer",
+                padding: 6,
+                lineHeight: 1,
+                fontSize: 16,
+              }}
+            >
+              {showPw.next ? "🙈" : "👁️"}
+            </button>
+          </div>
+
+          <div style={{ position: "relative", display: "inline-block" }}>
+            <input
+              placeholder="Confirm new password"
+              type={showPw.confirm ? "text" : "password"}
+              value={pwForm.confirmPassword}
+              onChange={(e) =>
+                setPwForm((p) => ({ ...p, confirmPassword: e.target.value }))
+              }
+              style={{ paddingRight: 44 }}
+            />
+            <button
+              type="button"
+              onClick={() => setShowPw((p) => ({ ...p, confirm: !p.confirm }))}
+              aria-label={
+                showPw.confirm
+                  ? "Hide confirm password"
+                  : "Show confirm password"
+              }
+              title={
+                showPw.confirm
+                  ? "Hide confirm password"
+                  : "Show confirm password"
+              }
+              style={{
+                position: "absolute",
+                right: 8,
+                top: "50%",
+                transform: "translateY(-50%)",
+                border: "none",
+                background: "transparent",
+                cursor: "pointer",
+                padding: 6,
+                lineHeight: 1,
+                fontSize: 16,
+              }}
+            >
+              {showPw.confirm ? "🙈" : "👁️"}
+            </button>
+          </div>
           <button type="button" onClick={changePassword}>
             Save
           </button>
