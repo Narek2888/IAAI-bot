@@ -2,7 +2,12 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { apiGet, apiPost } from "../src/api";
 
 export default function Bot() {
-  const [bot, setBot] = useState({ running: false, lastOutput: null });
+  const [bot, setBot] = useState({
+    running: false,
+    lastOutput: null,
+    continuousEnabled: null,
+    filtersSet: null,
+  });
 
   const inFlightRef = useRef(false);
   const loopIdRef = useRef(0); // increments to cancel previous loops
@@ -12,8 +17,16 @@ export default function Bot() {
     if (inFlightRef.current) return;
     inFlightRef.current = true;
     try {
-      const r = await apiGet("/api/bot/status");
-      if (r?.ok) setBot(r.bot || { running: false, lastOutput: null });
+      const [settings, status] = await Promise.all([
+        apiGet("/api/bot/settings"),
+        apiGet("/api/bot/status"),
+      ]);
+
+      setBot((prev) => ({
+        ...prev,
+        ...(settings?.ok ? settings.bot : null),
+        ...(status?.ok ? status.bot : null),
+      }));
     } finally {
       inFlightRef.current = false;
     }
@@ -83,6 +96,7 @@ export default function Bot() {
     <div style={{ marginTop: 16 }}>
       <h3>Bot</h3>
       <div>Running: {String(bot.running)}</div>
+      <div>Auto-resume (saved): {String(bot.continuousEnabled)}</div>
 
       <button onClick={runOnce}>Run once</button>
       <button onClick={start} disabled={bot.running}>

@@ -18,7 +18,8 @@ app.get("/api/health", (req, res) => res.json({ ok: true }));
 
 app.use("/api/auth", require("./auth"));
 app.use("/api/filters", require("./filters"));
-app.use("/api/bot", require("./bot"));
+const botRouter = require("./bot");
+app.use("/api/bot", botRouter);
 
 // Serve built Vite frontend (optional, for production deploys)
 const FRONTEND_DIST = path.join(__dirname, "../frontend/dist");
@@ -39,6 +40,22 @@ app.use("/api", (req, res) => {
 
 async function start() {
   await migrate();
+
+  // After deploy/restart, resume any per-user continuous bot runs that were
+  // enabled previously (stored in DB).
+  if (typeof botRouter.resumeContinuousBots === "function") {
+    try {
+      const r = await botRouter.resumeContinuousBots();
+      console.log(
+        `Resumed continuous bots: ${r?.resumed ?? 0} (pollMs=${
+          r?.pollMs ?? "?"
+        })`
+      );
+    } catch (e) {
+      console.error("Failed to resume continuous bots:", e);
+    }
+  }
+
   app.listen(PORT, () => {
     console.log(`API server running on port ${PORT}`);
   });

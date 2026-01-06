@@ -28,6 +28,37 @@ const IAAI_HEADERS = {
 // per-user bot state
 const states = new Map(); // userId -> state
 
+async function setBotContinuous(userId, enabled) {
+  await db.query("UPDATE users SET bot_continuous = $1 WHERE id = $2", [
+    !!enabled,
+    userId,
+  ]);
+}
+
+async function getBotContinuous(userId) {
+  const r = await db.query(
+    "SELECT bot_continuous FROM users WHERE id = $1 LIMIT 1",
+    [userId]
+  );
+  const row = r.rows[0];
+  return row ? !!row.bot_continuous : false;
+}
+
+function hasAnyFiltersSet(u) {
+  if (!u) return false;
+  return [
+    u.filter_name,
+    u.year_from,
+    u.year_to,
+    u.auction_type,
+    u.inventory_type,
+    u.min_bid,
+    u.max_bid,
+    u.odo_from,
+    u.odo_to,
+  ].some((v) => v !== null && v !== undefined && String(v).trim() !== "");
+}
+
 function getState(userId) {
   if (!states.has(userId)) {
     states.set(userId, {
@@ -36,6 +67,10 @@ function getState(userId) {
       lastOutput: null,
       lastRunAt: null,
       timer: null,
+
+      // persisted preference (DB)
+      continuousEnabled: null,
+      lastContinuousAt: 0,
 
       lastSeen: {},
       lastCount: 0,
@@ -51,6 +86,17 @@ function getState(userId) {
     });
   }
   return states.get(userId);
+}
+
+async function refreshContinuousState(userId, st, maxAgeMs = 5000) {
+  const now = Date.now();
+  if (st.continuousEnabled !== null && now - st.lastContinuousAt < maxAgeMs) {
+    return st.continuousEnabled;
+  }
+  const enabled = await getBotContinuous(userId);
+  st.continuousEnabled = enabled;
+  st.lastContinuousAt = now;
+  return enabled;
 }
 
 function computeEtag(obj) {
@@ -179,6 +225,7 @@ function buildIaaiPayloadFromUserFilters(u) {
 async function fetchUserFilters(userId) {
   const r = await db.query(
     `SELECT
+      filter_name,
       year_from, year_to,
       auction_type, inventory_type,
       min_bid, max_bid,
@@ -188,6 +235,69 @@ async function fetchUserFilters(userId) {
     [userId]
   );
   return r.rows[0] || null;
+}
+
+async function fetchUserBotSettings(userId) {
+  const r = await db.query(
+    `SELECT
+      bot_continuous,
+      filter_name,
+      year_from, year_to,
+      auction_type, inventory_type,
+      min_bid, max_bid,
+      odo_from, odo_to
+     FROM users
+     WHERE id = $1`,
+    [userId]
+  );
+  return r.rows[0] || null;
+}
+
+async function startContinuousForUser(userId) {
+  const st = getState(userId);
+
+  // Idempotent: if already running, do nothing
+  if (st.running && st.timer) return;
+
+  // Only start if user has some filters configured
+  const filters = await fetchUserFilters(userId);
+  if (!hasAnyFiltersSet(filters)) {
+    st.running = false;
+    if (st.timer) clearInterval(st.timer);
+    st.timer = null;
+    st.lastRunAt = Date.now();
+    st.lastOutput = "Not started: no filters saved for this user";
+    return;
+  }
+
+  if (st.timer) clearInterval(st.timer);
+  st.running = true;
+
+  // Run immediately once, then schedule
+  await runOnceForUser(userId);
+
+  const pollMs = Number(process.env.BOT_POLL_MS || 10 * 60 * 1000);
+  st.timer = setInterval(() => {
+    runOnceForUser(userId).catch((e) => {
+      console.error("Bot interval error:", e);
+      st.lastRunAt = Date.now();
+      st.lastOutput = `IAAI error: ${e?.message || "unknown error"}`;
+      st.lastIaaiResponse = {
+        status: null,
+        contentType: "error",
+        text: st.lastOutput,
+      };
+    });
+  }, pollMs);
+
+  if (typeof st.timer.unref === "function") st.timer.unref();
+}
+
+function stopContinuousForUser(userId) {
+  const st = getState(userId);
+  st.running = false;
+  if (st.timer) clearInterval(st.timer);
+  st.timer = null;
 }
 
 function summarizeIaaiResponse(resp) {
@@ -323,8 +433,9 @@ async function runOnceForUser(userId) {
 }
 
 // GET /api/bot/status
-router.get("/status", authRequired, (req, res) => {
-  const st = getState(req.user.id);
+router.get("/status", authRequired, async (req, res) => {
+  const userId = req.user.id;
+  const st = getState(userId);
   const debug = String(req.query.debug || "") === "1";
 
   // Coalesce frequent status calls (e.g. refresh + polling)
@@ -342,10 +453,20 @@ router.get("/status", authRequired, (req, res) => {
     return res.json(st.lastStatusJson);
   }
 
+  // Include persisted preference for UI (survives restarts/deploys)
+  let continuousEnabled = st.continuousEnabled;
+  try {
+    continuousEnabled = await refreshContinuousState(userId, st);
+  } catch (e) {
+    // Don't fail status if DB read fails; just omit preference.
+    console.error("Failed to read bot_continuous:", e);
+  }
+
   const payload = {
     ok: true,
     bot: {
       running: !!st.running,
+      continuousEnabled,
       lastOutput: st.lastOutput,
       lastRunAt: st.lastRunAt,
       ...(debug
@@ -370,6 +491,33 @@ router.get("/status", authRequired, (req, res) => {
   return res.json(payload);
 });
 
+// GET /api/bot/settings
+// Exposes DB-backed preferences so the UI can reflect auto-resume state after restart.
+router.get("/settings", authRequired, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const st = getState(userId);
+
+    const row = await fetchUserBotSettings(userId);
+    const continuousEnabled = !!row?.bot_continuous;
+    const filtersSet = hasAnyFiltersSet(row || null);
+
+    st.continuousEnabled = continuousEnabled;
+    st.lastContinuousAt = Date.now();
+
+    return res.json({
+      ok: true,
+      bot: {
+        continuousEnabled,
+        filtersSet,
+      },
+    });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ ok: false, msg: "Server error" });
+  }
+});
+
 // POST /api/bot/run?mode=once|start|stop
 router.post("/run", authRequired, async (req, res) => {
   const mode = String(req.query.mode || "once");
@@ -383,50 +531,30 @@ router.post("/run", authRequired, async (req, res) => {
     }
 
     if (mode === "start") {
-      // Idempotent: if already running, don't restart timer and don't trigger extra IAAI calls
-      if (st.running && st.timer) {
-        const pollMs = Number(process.env.BOT_POLL_MS || 10 * 60 * 1000);
-        st.lastOutput = st.lastOutput || "Already running";
-        return res.json({
-          ok: true,
-          iaai: st.lastIaaiResponse,
-          pollMs,
-          alreadyRunning: true,
-        });
-      }
+      // Persist preference so it can resume after deploy/restart
+      await setBotContinuous(userId, true);
+      st.continuousEnabled = true;
+      st.lastContinuousAt = Date.now();
+      st.lastStatusJson = null;
 
-      if (st.timer) clearInterval(st.timer);
-      st.running = true;
-
-      const r = await runOnceForUser(userId);
+      const alreadyRunning = !!(st.running && st.timer);
+      await startContinuousForUser(userId);
 
       const pollMs = Number(process.env.BOT_POLL_MS || 10 * 60 * 1000);
-      st.timer = setInterval(() => {
-        runOnceForUser(userId).catch((e) => {
-          console.error("Bot interval error:", e);
-          st.lastRunAt = Date.now();
-          st.lastOutput = `IAAI error: ${e?.message || "unknown error"}`;
-          st.lastIaaiResponse = {
-            status: null,
-            contentType: "error",
-            text: st.lastOutput,
-          };
-        });
-      }, pollMs);
-
-      if (typeof st.timer.unref === "function") st.timer.unref();
       return res.json({
         ok: true,
-        iaai: r.iaai,
+        iaai: st.lastIaaiResponse,
         pollMs,
-        alreadyRunning: false,
+        alreadyRunning,
       });
     }
 
     if (mode === "stop") {
-      st.running = false;
-      if (st.timer) clearInterval(st.timer);
-      st.timer = null;
+      await setBotContinuous(userId, false);
+      st.continuousEnabled = false;
+      st.lastContinuousAt = Date.now();
+      st.lastStatusJson = null;
+      stopContinuousForUser(userId);
       return res.json({ ok: true });
     }
 
@@ -445,6 +573,35 @@ router.post("/run", authRequired, async (req, res) => {
     return res.status(500).json({ ok: false, msg: st.lastOutput });
   }
 });
+
+// Resume per-user continuous bots after deploy/restart.
+// This is intentionally called from backend/index.js after migrations.
+router.resumeContinuousBots = async function resumeContinuousBots() {
+  const pollMs = Number(process.env.BOT_POLL_MS || 10 * 60 * 1000);
+
+  const r = await db.query(
+    "SELECT id FROM users WHERE bot_continuous = true ORDER BY id"
+  );
+
+  const userIds = r.rows.map((row) => row.id);
+  if (userIds.length === 0) return { resumed: 0, pollMs };
+
+  let resumed = 0;
+  for (const userId of userIds) {
+    try {
+      await startContinuousForUser(userId);
+      const st = getState(userId);
+      if (st.running && st.timer) resumed += 1;
+    } catch (e) {
+      console.error("Failed to resume bot for user", userId, e);
+      const st = getState(userId);
+      st.lastRunAt = Date.now();
+      st.lastOutput = `Resume failed: ${e?.message || "unknown error"}`;
+    }
+  }
+
+  return { resumed, pollMs };
+};
 
 function isMeaningful(v) {
   if (v == null) return false;
