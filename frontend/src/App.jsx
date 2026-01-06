@@ -26,6 +26,12 @@ function saveUser(user) {
 
 export default function App() {
   const [user, setUser] = useState(null);
+  const [showChangePassword, setShowChangePassword] = useState(false);
+  const [pwForm, setPwForm] = useState({
+    currentPassword: "",
+    newPassword: "",
+    confirmPassword: "",
+  });
 
   useEffect(() => {
     const token = loadTokenFromStorage();
@@ -69,6 +75,31 @@ export default function App() {
     setUser(null);
   };
 
+  const changePassword = async () => {
+    if (!pwForm.currentPassword || !pwForm.newPassword) {
+      alert("Please enter your current and new password");
+      return;
+    }
+    if (pwForm.newPassword !== pwForm.confirmPassword) {
+      alert("New password and confirmation do not match");
+      return;
+    }
+
+    const r = await apiPost("/api/auth/change-password", {
+      currentPassword: pwForm.currentPassword,
+      newPassword: pwForm.newPassword,
+    });
+
+    if (!r?.ok) {
+      alert(r?.msg || "Failed to change password");
+      return;
+    }
+
+    alert("Password changed");
+    setPwForm({ currentPassword: "", newPassword: "", confirmPassword: "" });
+    setShowChangePassword(false);
+  };
+
   if (!user) return <Auth onAuth={onAuth} />;
 
   return (
@@ -82,6 +113,10 @@ export default function App() {
           Logout
         </button>
 
+        <button type="button" onClick={() => setShowChangePassword((v) => !v)}>
+          Cange password
+        </button>
+
         {/* Visible only when logged in */}
         <button
           type="button"
@@ -91,6 +126,38 @@ export default function App() {
           Delete Account
         </button>
       </div>
+
+      {showChangePassword && (
+        <div style={{ marginTop: 12, display: "flex", gap: 8 }}>
+          <input
+            placeholder="Current password"
+            type="password"
+            value={pwForm.currentPassword}
+            onChange={(e) =>
+              setPwForm((p) => ({ ...p, currentPassword: e.target.value }))
+            }
+          />
+          <input
+            placeholder="New password"
+            type="password"
+            value={pwForm.newPassword}
+            onChange={(e) =>
+              setPwForm((p) => ({ ...p, newPassword: e.target.value }))
+            }
+          />
+          <input
+            placeholder="Confirm new password"
+            type="password"
+            value={pwForm.confirmPassword}
+            onChange={(e) =>
+              setPwForm((p) => ({ ...p, confirmPassword: e.target.value }))
+            }
+          />
+          <button type="button" onClick={changePassword}>
+            Save
+          </button>
+        </div>
+      )}
 
       <Filters />
       <Bot />

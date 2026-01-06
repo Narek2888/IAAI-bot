@@ -27,7 +27,7 @@ describe("Auth Component", () => {
     render(<Auth onAuth={mockOnAuth} />);
 
     fireEvent.change(screen.getByPlaceholderText("Username"), {
-      target: { value: "testuser" },
+      target: { value: "TestUser" },
     });
     fireEvent.change(screen.getByPlaceholderText("Password"), {
       target: { value: "password123" },
@@ -41,6 +41,11 @@ describe("Auth Component", () => {
         username: "testuser",
       });
     });
+
+    // Username is always sent lowercased
+    expect(global.fetch).toHaveBeenCalled();
+    const body = global.fetch.mock.calls[0]?.[1]?.body;
+    expect(body).toContain('"username":"testuser"');
 
     expect(screen.queryByText("Sign in failed")).not.toBeInTheDocument();
   });

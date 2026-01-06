@@ -16,10 +16,18 @@ export default function Auth({ onAuth }) {
     e.preventDefault();
     setError("");
 
+    const usernameNorm = String(form.username || "")
+      .trim()
+      .toLowerCase();
+
     const url = isLogin ? "/api/auth/signin" : "/api/auth/signup";
     const payload = isLogin
-      ? { username: form.username, password: form.password }
-      : { username: form.username, email: form.email, password: form.password };
+      ? { username: usernameNorm, password: form.password }
+      : {
+          username: usernameNorm,
+          email: form.email,
+          password: form.password,
+        };
 
     let raw;
     try {

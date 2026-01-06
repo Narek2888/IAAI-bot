@@ -28,6 +28,12 @@ function publicUser(u) {
   };
 }
 
+function normalizeUsername(username) {
+  return String(username || "")
+    .trim()
+    .toLowerCase();
+}
+
 // SIGNUP
 router.post("/signup", async (req, res) => {
   const { username, email, password } = req.body || {};
@@ -38,9 +44,18 @@ router.post("/signup", async (req, res) => {
   }
 
   try {
-    const usernameNorm = String(username).trim();
+    const usernameNorm = normalizeUsername(username);
     const emailNorm = String(email).trim();
     const hash = await bcrypt.hash(String(password), 10);
+
+    // Prevent duplicates ignoring case, even if the DB constraint is case-sensitive.
+    const existing = await db.query(
+      "SELECT id FROM users WHERE lower(username) = $1 LIMIT 1",
+      [usernameNorm]
+    );
+    if (existing.rows[0]) {
+      return res.status(400).json({ ok: false, msg: "User already exists" });
+    }
 
     const { user, token } = await db.tx(async (client) => {
       const inserted = await client.query(
@@ -80,9 +95,11 @@ router.post("/signin", async (req, res) => {
 
   let user;
   try {
-    const r = await db.query("SELECT * FROM users WHERE username = $1", [
-      String(username).trim(),
-    ]);
+    const usernameNorm = normalizeUsername(username);
+    const r = await db.query(
+      "SELECT * FROM users WHERE lower(username) = $1 LIMIT 1",
+      [usernameNorm]
+    );
     user = r.rows[0];
   } catch (e) {
     console.error(e);
@@ -129,6 +146,42 @@ router.post("/delete", authRequired, (req, res) => {
   } catch (e) {
     console.error(e);
     return res.status(500).json({ ok: false, msg: "Failed to delete account" });
+  }
+});
+
+// Change password (logged-in user)
+router.post("/change-password", authRequired, async (req, res) => {
+  const { currentPassword, newPassword } = req.body || {};
+  if (!currentPassword || !newPassword) {
+    return res
+      .status(400)
+      .json({ ok: false, msg: "Missing currentPassword/newPassword" });
+  }
+
+  try {
+    const userId = req.user.id;
+    const r = await db.query("SELECT id, password FROM users WHERE id = $1", [
+      userId,
+    ]);
+    const user = r.rows[0];
+    if (!user) return res.status(401).json({ ok: false, msg: "unauthorized" });
+
+    const match = await bcrypt.compare(String(currentPassword), user.password);
+    if (!match)
+      return res
+        .status(401)
+        .json({ ok: false, msg: "Current password is incorrect" });
+
+    const hash = await bcrypt.hash(String(newPassword), 10);
+    await db.query("UPDATE users SET password = $1 WHERE id = $2", [
+      hash,
+      userId,
+    ]);
+
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ ok: false, msg: "Server error" });
   }
 });
 

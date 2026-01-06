@@ -5,11 +5,24 @@ let pool;
 function getPool() {
   if (pool) return pool;
 
-  const connectionString = process.env.DATABASE_URL;
+  let connectionString = process.env.DATABASE_URL;
   if (!connectionString) {
     throw new Error(
       "DATABASE_URL is required (add it locally in .env and in Railway Variables)"
     );
+  }
+
+  // On some Windows setups, 'localhost' resolves to IPv6 (::1) while Postgres is
+  // only listening on IPv4 (127.0.0.1), causing ECONNREFUSED ::1:5432.
+  // Normalize localhost to IPv4 for local dev.
+  try {
+    const u = new URL(connectionString);
+    if (u.hostname === "localhost") {
+      u.hostname = "127.0.0.1";
+      connectionString = u.toString();
+    }
+  } catch {
+    // If DATABASE_URL isn't a standard URL, leave it unchanged.
   }
 
   // Railway Postgres typically requires SSL. Local Postgres usually doesn't.

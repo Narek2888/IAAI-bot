@@ -7,6 +7,8 @@ const fs = require("fs");
 const { migrate } = require("./migrate");
 
 const app = express();
+// Vite dev server proxies /api -> http://127.0.0.1:5174 by default.
+// Avoid defaulting to 5432 (Postgres default port).
 const PORT = process.env.PORT || 5174;
 
 app.use(cors({ origin: true, credentials: true }));
