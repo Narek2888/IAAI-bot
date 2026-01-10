@@ -60,7 +60,14 @@ export default function Auth({ onAuth }) {
 
   return (
     <div>
-      <div style={{ marginBottom: 8 }}>
+      <div
+        style={{
+          marginBottom: 8,
+          display: "flex",
+          gap: 16,
+          alignItems: "center",
+        }}
+      >
         <button
           type="button"
           onClick={() => setIsLogin(true)}
@@ -77,7 +84,10 @@ export default function Auth({ onAuth }) {
         </button>
       </div>
 
-      <form onSubmit={handleSubmit}>
+      <form
+        onSubmit={handleSubmit}
+        style={{ display: "flex", flexDirection: "column", gap: 12 }}
+      >
         <input
           name="username"
           placeholder="Username"

@@ -25,8 +25,7 @@ app.use(
     credentials: true,
   })
 );
-
-init();
+To: filters?.max_bid ?? 150000, init();
 
 const bots = new Map();
 
@@ -87,10 +86,10 @@ app.get("/", (req, res) => {
             <label>Year To</label>
             <input id="year_to" type="number" value="${new Date().getFullYear()}" />
           </div>
-          <div>
+          <!-- <div>
             <label>Auction Type</label>
             <select id="auction_type"><option>Buy Now</option></select>
-          </div>
+          </div> -->
           <div>
             <label>Inventory Type</label>
             <select id="inventory_type"><option>Automobiles</option><option>Motorcycles</option></select>
@@ -101,11 +100,11 @@ app.get("/", (req, res) => {
           </div>
           <div>
             <label>Max Bid ($)</label>
-            <input id="max_bid" type="number" value="50000" />
+            <input id="max_bid" type="number" value="150000" />
           </div>
           <div>
             <label>Max Mileage</label>
-            <input id="odo_max" type="number" value="200000" />
+            <input id="odo_max" type="number" value="150000" />
           </div>
         </div>
         <div style="margin-top:10px;display:flex;gap:8px">
@@ -339,10 +338,11 @@ app.get("/", (req, res) => {
       function readFilters(){ return {
         year_from: Number(document.getElementById('year_from').value),
         year_to: Number(document.getElementById('year_to').value),
-        auction_type: document.getElementById('auction_type').value,
+        // Auction Type is not shown in the UI; always use Buy Now.
+        auction_type: 'Buy Now',
         min_bid: Number(document.getElementById('min_bid').value),
         max_bid: Number(document.getElementById('max_bid').value),
-        odo_max: Number(document.getElementById('odo_max').value),
+        odo_max: Number(document.getElementById('odo_max').value || 150000),
         inventory_type: document.getElementById('inventory_type').value,
       }; }
 
@@ -427,7 +427,7 @@ function buildPayload(filters) {
       },
       {
         LongRanges: [
-          { From: 0, To: filters?.odo_max ?? 200000, Name: "ODOValue" },
+          { From: 0, To: filters?.odo_max ?? 150000, Name: "ODOValue" },
         ],
       },
       {

@@ -30,6 +30,17 @@ function extractNameFromVehicleDetailUrl(u) {
   return m ? m[1] : null;
 }
 
+function isValidVehicleId(id) {
+  const s = String(id || "").trim();
+  // IAAI VehicleDetail ids are numeric inventory ids (e.g. 44226123)
+  return /^\d{6,}$/.test(s);
+}
+
+function extractVehicleIdFromVehicleDetailUrl(u) {
+  const raw = extractNameFromVehicleDetailUrl(u);
+  return isValidVehicleId(raw) ? raw : null;
+}
+
 function getNextValueByLabel($, scope, labelText) {
   const label = scope
     .find(".data-list__label")
@@ -69,15 +80,33 @@ function parseVehicleFromRow($, $row) {
   const vehicle_link = absUrl(titleA.attr("href"));
 
   // Stock #
-  const stock_id = getNextValueByLabel($, $row, "Stock #:") || null;
+  const stock_id =
+    getNextValueByLabel($, $row, "Stock #:") ||
+    getNextValueByLabel($, $row, "Stock #") ||
+    null;
 
-  // Price (Buy Now / Current Bid text is in action list)
+  // Price (Buy Now / Current Bid text is often in action list)
   const actionA = $row
     .find('ul.data-list--action a[href^="/VehicleDetail/"]')
     .filter((_, a) => /buy\s+now|current\s+bid|bid/i.test($(a).text()))
     .first();
   const actionText = actionA.text().trim();
-  const price = extractMoney(actionText) || null;
+  const priceFromAction = extractMoney(actionText);
+
+  // Fallback: some layouts expose bid/buy-now values as label/value pairs
+  const priceFromLabels =
+    extractMoney(getNextValueByLabel($, $row, "Buy Now:") || "") ||
+    extractMoney(getNextValueByLabel($, $row, "Buy Now") || "") ||
+    extractMoney(getNextValueByLabel($, $row, "Current Bid:") || "") ||
+    extractMoney(getNextValueByLabel($, $row, "Current Bid") || "") ||
+    extractMoney(getNextValueByLabel($, $row, "Bid:") || "") ||
+    extractMoney(getNextValueByLabel($, $row, "Bid") || "") ||
+    null;
+
+  // Last resort: scan row text for a money token
+  const priceFromRowText = extractMoney($row.text()) || null;
+
+  const price = priceFromAction || priceFromLabels || priceFromRowText;
 
   // Image
   const imgEl = $row.find("img[data-src], img[src]").first();
@@ -86,7 +115,7 @@ function parseVehicleFromRow($, $row) {
     ? `<img src="${imgUrl}" width="400" height="300" />`
     : null;
 
-  const name = extractNameFromVehicleDetailUrl(vehicle_link);
+  const name = extractVehicleIdFromVehicleDetailUrl(vehicle_link);
 
   return {
     name,
@@ -133,21 +162,25 @@ function extractVehiclesFromHtml(html, limit = 200) {
           const v = parseVehicleFromRow($, $(row));
           if (!v.vehicle_link && !v.name) return null;
 
+          const vehicleId =
+            v.name || extractVehicleIdFromVehicleDetailUrl(v.vehicle_link);
+          if (!vehicleId) return null;
+
           // normalize stock to digits (if present)
           const stock_id = normalizeStockNumber(v.stock_id);
 
           // If image missing, fall back to vis resizer using name (when possible)
           const image =
             v.image ||
-            (v.name
-              ? `<img src="https://vis.iaai.com/resizer?imageKeys=${v.name}~SID~I1&width=400&height=300" width="400" height="300" />`
+            (vehicleId
+              ? `<img src="https://vis.iaai.com/resizer?imageKeys=${vehicleId}~SID~I1&width=400&height=300" width="400" height="300" />`
               : null);
 
           return {
             title: v.title,
             vehicle_link:
               v.vehicle_link ||
-              (v.name ? `${BASE_URL}/VehicleDetail/${v.name}~US` : null),
+              (vehicleId ? `${BASE_URL}/VehicleDetail/${vehicleId}~US` : null),
             stock_id,
             price: v.price,
             image,
@@ -238,7 +271,7 @@ function extractVehiclesFromHtml(html, limit = 200) {
           node.CurrentBid ??
           null;
 
-        if (name && typeof name === "string") {
+        if (name && typeof name === "string" && isValidVehicleId(name)) {
           vehicles.push({
             name,
             stock_id,
@@ -277,7 +310,7 @@ function extractVehiclesFromHtml(html, limit = 200) {
         .map((x) => {
           const id = x?.Id; // "44226123~US"
           const inv = id ? String(id).split("~")[0] : null;
-          if (!inv) return null;
+          if (!inv || !isValidVehicleId(inv)) return null;
 
           return {
             title: null,
@@ -305,7 +338,9 @@ function extractVehiclesFromHtml(html, limit = 200) {
     [...html.matchAll(/\/VehicleDetail\/([A-Za-z0-9]+)~US/g)].map((m) => m[1])
   );
 
-  const names = uniq([...namesFromImages, ...namesFromLinks]).slice(0, limit);
+  const names = uniq([...namesFromImages, ...namesFromLinks])
+    .filter((n) => isValidVehicleId(n))
+    .slice(0, limit);
 
   return names.map((name) => ({
     title: null,

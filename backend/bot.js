@@ -52,6 +52,9 @@ function hasAnyFiltersSet(u) {
     u.year_to,
     u.auction_type,
     u.inventory_type,
+    Array.isArray(u.inventory_types) ? u.inventory_types.join(",") : null,
+    u.fuel_type,
+    Array.isArray(u.fuel_types) ? u.fuel_types.join(",") : null,
     u.min_bid,
     u.max_bid,
     u.odo_from,
@@ -157,6 +160,19 @@ function toNumberOrNull(v) {
   return Number.isFinite(n) ? n : null;
 }
 
+function extractImgSrc(imageValue) {
+  if (!imageValue) return null;
+  const s = String(imageValue);
+  if (!s) return null;
+
+  if (s.toLowerCase().includes("<img")) {
+    const m = s.match(/src\s*=\s*["']([^"']+)["']/i);
+    return m ? m[1] : null;
+  }
+
+  return s;
+}
+
 // ✅ MISSING HELPERS (were causing 500)
 function pushLongRange(Searches, name, from, to) {
   const From = toNumberOrNull(from);
@@ -176,18 +192,22 @@ function pushLongRange(Searches, name, from, to) {
   });
 }
 
-function pushFacet(Searches, group, value) {
+function pushFacet(Searches, group, value, forAnalytics) {
   if (value === null || value === undefined || String(value).trim() === "")
     return;
 
+  const facet = {
+    Group: group,
+    Value: String(value),
+  };
+
+  // request_data.js sometimes omits ForAnalytics; only include when explicitly passed.
+  if (forAnalytics !== undefined) {
+    facet.ForAnalytics = !!forAnalytics;
+  }
+
   Searches.push({
-    Facets: [
-      {
-        Group: group,
-        Value: String(value),
-        ForAnalytics: false,
-      },
-    ],
+    Facets: [facet],
     FullSearch: null,
     LongRanges: null,
   });
@@ -197,11 +217,45 @@ function pushFacet(Searches, group, value) {
 function buildIaaiPayloadFromUserFilters(u) {
   const Searches = [];
 
-  pushLongRange(Searches, "Year", u.year_from, u.year_to);
-  pushFacet(Searches, "AuctionType", u.auction_type);
-  pushLongRange(Searches, "MinimumBidAmount", u.min_bid, u.max_bid);
+  const inventoryTypes =
+    Array.isArray(u.inventory_types) && u.inventory_types.length
+      ? u.inventory_types
+      : u.inventory_type
+      ? [u.inventory_type]
+      : [];
+  const fuelTypes =
+    Array.isArray(u.fuel_types) && u.fuel_types.length
+      ? u.fuel_types
+      : u.fuel_type
+      ? [u.fuel_type]
+      : [];
+
+  // Keep payload stable and website-like ordering
+  const fuelTypesOrdered = ["Electric", "Other"].filter((v) =>
+    fuelTypes.includes(v)
+  );
+  const inventoryTypesOrdered = ["Automobiles", "Motorcycles"].filter((v) =>
+    inventoryTypes.includes(v)
+  );
+
+  // Match real IAAI payload style: one Searches entry per facet value.
+  for (const ft of fuelTypesOrdered) pushFacet(Searches, "FuelTypeDesc", ft);
+
+  // Ranges and single facets
   pushLongRange(Searches, "ODOValue", u.odo_from, u.odo_to);
-  pushFacet(Searches, "InventoryTypes", u.inventory_type);
+  // Auction Type is no longer user-configurable in the UI; always use Buy Now.
+  pushFacet(Searches, "AuctionType", "Buy Now");
+  pushLongRange(Searches, "MinimumBidAmount", u.min_bid, u.max_bid);
+  const yearFrom = toNumberOrNull(u.year_from);
+  const yearTo = toNumberOrNull(u.year_to);
+  if (yearFrom === null && yearTo === null) {
+    pushLongRange(Searches, "Year", 1900, 2027);
+  } else {
+    pushLongRange(Searches, "Year", yearFrom, yearTo);
+  }
+
+  for (const it of inventoryTypesOrdered)
+    pushFacet(Searches, "InventoryTypes", it);
 
   return {
     Searches,
@@ -212,7 +266,7 @@ function buildIaaiPayloadFromUserFilters(u) {
     Sort: [
       {
         IsGeoSort: false,
-        SortField: "TenantSortOrder",
+        SortField: "AuctionDateTime",
         IsDescending: false,
       },
     ],
@@ -227,7 +281,7 @@ async function fetchUserFilters(userId) {
     `SELECT
       filter_name,
       year_from, year_to,
-      auction_type, inventory_type,
+      auction_type, inventory_type, inventory_types, fuel_type, fuel_types,
       min_bid, max_bid,
       odo_from, odo_to
      FROM users
@@ -243,7 +297,7 @@ async function fetchUserBotSettings(userId) {
       bot_continuous,
       filter_name,
       year_from, year_to,
-      auction_type, inventory_type,
+      auction_type, inventory_type, inventory_types, fuel_type, fuel_types,
       min_bid, max_bid,
       odo_from, odo_to
      FROM users
@@ -406,6 +460,28 @@ async function runOnceForUser(userId) {
 
         if (user?.email) {
           try {
+            if (String(process.env.DEBUG_EMAIL_VEHICLES || "") === "1") {
+              const sample = changes[0] || null;
+              if (sample) {
+                console.log("[email-debug] sample vehicle", {
+                  userId,
+                  email: user.email,
+                  changes: changes.length,
+                  title: sample.title ?? null,
+                  vehicle_link: sample.vehicle_link ?? null,
+                  stock_id: sample.stock_id ?? null,
+                  price: sample.price ?? null,
+                  image_src: extractImgSrc(sample.image),
+                });
+              } else {
+                console.log("[email-debug] no sample vehicle", {
+                  userId,
+                  email: user.email,
+                  changes: 0,
+                });
+              }
+            }
+
             await sendVehiclesEmail({
               to: user.email,
               subject: `IAAI updates for ${user.username} (${changes.length})`,

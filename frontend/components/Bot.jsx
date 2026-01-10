@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { apiGet, apiPost } from "../src/api";
 
-export default function Bot() {
+export default function Bot({ disabled = false }) {
   const [bot, setBot] = useState({
     running: false,
     lastOutput: null,
@@ -98,13 +98,17 @@ export default function Bot() {
       <div>Running: {String(bot.running)}</div>
       <div>Auto-resume (saved): {String(bot.continuousEnabled)}</div>
 
-      <button onClick={runOnce}>Run once</button>
-      <button onClick={start} disabled={bot.running}>
-        Start continuous
-      </button>
-      <button onClick={stop} disabled={!bot.running}>
-        Stop
-      </button>
+      <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
+        <button onClick={runOnce} disabled={disabled}>
+          Run once
+        </button>
+        <button onClick={start} disabled={bot.running || disabled}>
+          Start continuous
+        </button>
+        <button onClick={stop} disabled={!bot.running}>
+          Stop
+        </button>
+      </div>
     </div>
   );
 }

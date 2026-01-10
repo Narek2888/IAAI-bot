@@ -55,16 +55,37 @@ function pick(obj, keys) {
   return null;
 }
 
+function extractVehicleIdFromVehicleDetailUrl(u) {
+  const s = String(u ?? "");
+  const m = s.match(/\/VehicleDetail\/(\w+)~US/i);
+  if (!m) return null;
+  const id = String(m[1] ?? "").trim();
+  return /^\d{6,}$/.test(id) ? id : null;
+}
+
+function isValidVisResizerImage(u) {
+  const s = String(u ?? "");
+  const m = s.match(/imageKeys=([^&]+)~SID~I1/i);
+  if (!m) return true; // not a resizer URL
+  const key = String(m[1] ?? "").trim();
+  return /^\d{6,}$/.test(key);
+}
+
 function normalizeVehicle(v) {
   const rawLink = pick(v, ["vehicle_link", "link", "url", "href"]);
-  const vehicle_link = rawLink ? absolutizeUrl(rawLink) : "";
+  const candidateLink = rawLink ? absolutizeUrl(rawLink) : "";
+  const vehicle_link = extractVehicleIdFromVehicleDetailUrl(candidateLink)
+    ? candidateLink
+    : "";
 
   const title = pick(v, ["title", "name", "vehicle", "vehicle_title"]);
   const stock_id = pick(v, ["stock_id", "stockId", "stock", "stock_number"]);
   const price = pick(v, ["price", "current_bid", "bid", "buy_now"]);
   const image = pick(v, ["image", "image_url", "imageUrl", "img", "photo"]);
 
-  return { vehicle_link, title, stock_id, price, image };
+  const safeImage = isValidVisResizerImage(image) ? image : null;
+
+  return { vehicle_link, title, stock_id, price, image: safeImage };
 }
 
 function buildImageHtml(imageValue) {

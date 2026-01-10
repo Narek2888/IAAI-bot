@@ -21,6 +21,11 @@ function publicUser(u) {
     year_to: u.year_to ?? null,
     auction_type: u.auction_type ?? null,
     inventory_type: u.inventory_type ?? null,
+    inventory_types: Array.isArray(u.inventory_types)
+      ? u.inventory_types
+      : null,
+    fuel_type: u.fuel_type ?? null,
+    fuel_types: Array.isArray(u.fuel_types) ? u.fuel_types : null,
     min_bid: u.min_bid ?? null,
     max_bid: u.max_bid ?? null,
     odo_from: u.odo_from ?? null,

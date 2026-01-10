@@ -142,7 +142,8 @@ function saveFilter(e) {
         name: f.filterName.value,
         year_from: f.year_from.value,
         year_to: f.year_to.value,
-        auction_type: f.auction_type.value,
+        // Auction Type is not user-configurable; always use Buy Now.
+        auction_type: "Buy Now",
         inventory_type: f.inventory_type.value,
         min_bid: f.min_bid.value,
         max_bid: f.max_bid.value,
@@ -160,9 +161,9 @@ function saveFilter(e) {
         f.auction_type.value = "Buy Now";
         f.inventory_type.value = "Automobiles";
         f.min_bid.value = 0;
-        f.max_bid.value = 1500;
+        f.max_bid.value = 150000;
         f.odo_from.value = 0;
-        f.odo_to.value = 50000;
+        f.odo_to.value = 150000;
         listFilters();
         showPopup(
           "Filter saved!",

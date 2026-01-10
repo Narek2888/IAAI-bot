@@ -3,10 +3,6 @@
   display: none;
   margin-top: 16px;
 }
-.signup-form {
-}
-.signin-form {
-}
 
 /* Password input and eye icon */
 .password-input {
@@ -73,6 +69,69 @@ textarea {
   box-sizing: border-box;
 }
 
+/* Select-like dropdown (for checkbox multi-selects) */
+details.dropdown {
+  position: relative;
+}
+
+summary.dropdown-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #dcdfe6;
+  border-radius: 6px;
+  box-sizing: border-box;
+  background: #fff;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  font-weight: 400;
+}
+
+summary.dropdown-trigger::-webkit-details-marker {
+  display: none;
+}
+
+summary.dropdown-trigger::after {
+  content: "▾";
+  margin-left: auto;
+  color: #6b7280;
+}
+
+details.dropdown[open] > summary.dropdown-trigger::after {
+  content: "▴";
+}
+
+.dropdown-panel {
+  position: absolute;
+  left: 0;
+  right: auto;
+  top: calc(100% + 6px);
+  z-index: 20;
+  width: max-content;
+  width: fit-content;
+  min-width: 100%;
+  max-width: 90vw;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid #dcdfe6;
+  border-radius: 6px;
+  padding: 8px;
+  background: #fff;
+  box-sizing: border-box;
+  text-align: left;
+  align-items: flex-start;
+}
+
+details.dropdown .dropdown-panel label {
+  font-weight: 400;
+  margin-bottom: 0;
+  justify-content: flex-start;
+}
+
 button {
   padding: 8px 12px;
   border-radius: 6px;
@@ -84,6 +143,18 @@ button {
 
 button.secondary {
   background: #6b7280;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.field-error {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #ef4444;
+  min-height: 14px;
 }
 
 .small {

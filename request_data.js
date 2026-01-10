@@ -15,13 +15,33 @@ const HEADERS = {
 const PAYLOAD = {
   Searches: [
     {
+      Facets: [
+        {
+          Group: "FuelTypeDesc",
+          Value: "Electric",
+        },
+      ],
+      FullSearch: null,
+      LongRanges: null,
+    },
+    {
+      Facets: [
+        {
+          Group: "FuelTypeDesc",
+          Value: "Other",
+        },
+      ],
+      FullSearch: null,
+      LongRanges: null,
+    },
+    {
       Facets: null,
       FullSearch: null,
       LongRanges: [
         {
-          From: 2020,
-          Name: "Year",
-          To: 2026,
+          From: 0,
+          Name: "ODOValue",
+          To: 150000,
         },
       ],
     },
@@ -30,7 +50,6 @@ const PAYLOAD = {
         {
           Group: "AuctionType",
           Value: "Buy Now",
-          ForAnalytics: false,
         },
       ],
       FullSearch: null,
@@ -43,17 +62,6 @@ const PAYLOAD = {
         {
           From: 0,
           Name: "MinimumBidAmount",
-          To: 1500,
-        },
-      ],
-    },
-    {
-      Facets: null,
-      FullSearch: null,
-      LongRanges: [
-        {
-          From: 0,
-          Name: "ODOValue",
           To: 50000,
         },
       ],
@@ -63,7 +71,16 @@ const PAYLOAD = {
         {
           Group: "InventoryTypes",
           Value: "Automobiles",
-          ForAnalytics: false,
+        },
+      ],
+      FullSearch: null,
+      LongRanges: null,
+    },
+    {
+      Facets: [
+        {
+          Group: "InventoryTypes",
+          Value: "Motorcycles",
         },
       ],
       FullSearch: null,
@@ -95,3 +112,78 @@ const PAYLOAD = {
     },
   ],
 };
+
+const PAYLOAD_NEW = [
+  {
+    Facets: [
+      {
+        Group: "FuelTypeDesc",
+        Value: "Electric",
+      },
+    ],
+    FullSearch: null,
+    LongRanges: null,
+  },
+  {
+    Facets: [
+      {
+        Group: "FuelTypeDesc",
+        Value: "Other",
+      },
+    ],
+    FullSearch: null,
+    LongRanges: null,
+  },
+  {
+    Facets: null,
+    FullSearch: null,
+    LongRanges: [
+      {
+        From: 0,
+        Name: "ODOValue",
+        To: 150000,
+      },
+    ],
+  },
+  {
+    Facets: [
+      {
+        Group: "AuctionType",
+        Value: "Buy Now",
+      },
+    ],
+    FullSearch: null,
+    LongRanges: null,
+  },
+  {
+    Facets: null,
+    FullSearch: null,
+    LongRanges: [
+      {
+        From: 0,
+        Name: "MinimumBidAmount",
+        To: 50000,
+      },
+    ],
+  },
+  {
+    Facets: [
+      {
+        Group: "InventoryTypes",
+        Value: "Automobiles",
+      },
+    ],
+    FullSearch: null,
+    LongRanges: null,
+  },
+  {
+    Facets: [
+      {
+        Group: "InventoryTypes",
+        Value: "Motorcycles",
+      },
+    ],
+    FullSearch: null,
+    LongRanges: null,
+  },
+];
