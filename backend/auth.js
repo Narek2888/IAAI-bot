@@ -17,6 +17,7 @@ function publicUser(u) {
     username: u.username,
     email: u.email,
     filter_name: u.filter_name ?? null,
+    full_search: u.full_search ?? null,
     year_from: u.year_from ?? null,
     year_to: u.year_to ?? null,
     auction_type: u.auction_type ?? null,

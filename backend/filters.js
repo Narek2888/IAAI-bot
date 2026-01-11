@@ -55,11 +55,17 @@ function normalizeFuelTypes(v) {
   return normalized.length ? normalized : null;
 }
 
+function normalizeFullSearch(v) {
+  if (v === null || v === undefined) return null;
+  const s = String(v).trim();
+  return s ? s : null;
+}
+
 router.get("/", authRequired, (req, res) => {
   (async () => {
     const r = await db.query(
       `SELECT
-        filter_name, year_from, year_to,
+        filter_name, full_search, year_from, year_to,
         auction_type, inventory_type, inventory_types, fuel_type, fuel_types,
         min_bid, max_bid,
         odo_from, odo_to
@@ -98,20 +104,22 @@ router.post("/", authRequired, (req, res) => {
     await db.query(
       `UPDATE users SET
         filter_name = $1,
-        year_from = $2,
-        year_to = $3,
-        auction_type = $4,
-        inventory_type = $5,
-        inventory_types = $6,
-        fuel_type = $7,
-        fuel_types = $8,
-        min_bid = $9,
-        max_bid = $10,
-        odo_from = $11,
-        odo_to = $12
-       WHERE id = $13`,
+        full_search = $2,
+        year_from = $3,
+        year_to = $4,
+        auction_type = $5,
+        inventory_type = $6,
+        inventory_types = $7,
+        fuel_type = $8,
+        fuel_types = $9,
+        min_bid = $10,
+        max_bid = $11,
+        odo_from = $12,
+        odo_to = $13
+       WHERE id = $14`,
       [
         f.filter_name ?? null,
+        normalizeFullSearch(f.full_search ?? null),
         toNumberOrNull(f.year_from),
         toNumberOrNull(f.year_to),
         normalizeAuctionType(f.auction_type ?? null),
@@ -130,7 +138,7 @@ router.post("/", authRequired, (req, res) => {
 
     const saved = await db.query(
       `SELECT
-        filter_name, year_from, year_to,
+        filter_name, full_search, year_from, year_to,
         auction_type, inventory_type, inventory_types, fuel_type, fuel_types,
         min_bid, max_bid,
         odo_from, odo_to

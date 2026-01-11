@@ -48,6 +48,7 @@ function hasAnyFiltersSet(u) {
   if (!u) return false;
   return [
     u.filter_name,
+    u.full_search,
     u.year_from,
     u.year_to,
     u.auction_type,
@@ -174,19 +175,32 @@ function extractImgSrc(imageValue) {
 }
 
 // ✅ MISSING HELPERS (were causing 500)
-function pushLongRange(Searches, name, from, to) {
-  const From = toNumberOrNull(from);
-  const To = toNumberOrNull(to);
-  if (From === null && To === null) return;
+function pushLongRange(
+  Searches,
+  name,
+  from,
+  to,
+  { defaultFrom = null, defaultTo = null } = {}
+) {
+  const fromN = toNumberOrNull(from);
+  const toN = toNumberOrNull(to);
+
+  // If user didn't provide anything, only emit when defaults are provided.
+  if (fromN === null && toN === null) {
+    if (defaultFrom === null && defaultTo === null) return;
+  }
+
+  const resolvedFrom = fromN ?? defaultFrom ?? 0;
+  const resolvedTo = toN ?? defaultTo ?? resolvedFrom;
 
   Searches.push({
     Facets: null,
     FullSearch: null,
     LongRanges: [
       {
-        From: From ?? 0,
+        From: resolvedFrom,
         Name: name,
-        To: To ?? From ?? 0,
+        To: resolvedTo,
       },
     ],
   });
@@ -209,6 +223,18 @@ function pushFacet(Searches, group, value, forAnalytics) {
   Searches.push({
     Facets: [facet],
     FullSearch: null,
+    LongRanges: null,
+  });
+}
+
+function pushFullSearch(Searches, value) {
+  if (value === null || value === undefined) return;
+  const s = String(value).trim();
+  if (!s) return;
+
+  Searches.push({
+    Facets: null,
+    FullSearch: s,
     LongRanges: null,
   });
 }
@@ -238,24 +264,40 @@ function buildIaaiPayloadFromUserFilters(u) {
     inventoryTypes.includes(v)
   );
 
-  // Match real IAAI payload style: one Searches entry per facet value.
-  for (const ft of fuelTypesOrdered) pushFacet(Searches, "FuelTypeDesc", ft);
-
-  // Ranges and single facets
-  pushLongRange(Searches, "ODOValue", u.odo_from, u.odo_to);
-  // Auction Type is no longer user-configurable in the UI; always use Buy Now.
+  // Match real IAAI payload ordering (as observed on the website).
+  // 1) AuctionType
   pushFacet(Searches, "AuctionType", "Buy Now");
-  pushLongRange(Searches, "MinimumBidAmount", u.min_bid, u.max_bid);
-  const yearFrom = toNumberOrNull(u.year_from);
-  const yearTo = toNumberOrNull(u.year_to);
-  if (yearFrom === null && yearTo === null) {
-    pushLongRange(Searches, "Year", 1900, 2027);
-  } else {
-    pushLongRange(Searches, "Year", yearFrom, yearTo);
+
+  // 2) Year
+  pushLongRange(Searches, "Year", u.year_from, u.year_to, {
+    defaultFrom: 1900,
+    defaultTo: 2027,
+  });
+
+  // 3) InventoryTypes (one Searches entry per selected value)
+  for (const it of inventoryTypesOrdered) {
+    pushFacet(Searches, "InventoryTypes", it);
   }
 
-  for (const it of inventoryTypesOrdered)
-    pushFacet(Searches, "InventoryTypes", it);
+  // 4) ODO range
+  pushLongRange(Searches, "ODOValue", u.odo_from, u.odo_to, {
+    defaultFrom: 0,
+    defaultTo: 150000,
+  });
+
+  // 5) Full text search (optional)
+  pushFullSearch(Searches, u.full_search);
+
+  // 6) FuelTypeDesc (one Searches entry per selected value)
+  for (const ft of fuelTypesOrdered) {
+    pushFacet(Searches, "FuelTypeDesc", ft);
+  }
+
+  // 7) MinimumBidAmount
+  pushLongRange(Searches, "MinimumBidAmount", u.min_bid, u.max_bid, {
+    defaultFrom: 0,
+    defaultTo: 150000,
+  });
 
   return {
     Searches,
@@ -280,6 +322,7 @@ async function fetchUserFilters(userId) {
   const r = await db.query(
     `SELECT
       filter_name,
+      full_search,
       year_from, year_to,
       auction_type, inventory_type, inventory_types, fuel_type, fuel_types,
       min_bid, max_bid,
@@ -296,6 +339,7 @@ async function fetchUserBotSettings(userId) {
     `SELECT
       bot_continuous,
       filter_name,
+      full_search,
       year_from, year_to,
       auction_type, inventory_type, inventory_types, fuel_type, fuel_types,
       min_bid, max_bid,

@@ -31,9 +31,8 @@ export default function FilterEditor({ user, onSaved }) {
     });
   };
 
-  const inventoryTypeError = inventoryTypes.length ? "" : "Select type";
-  const fuelTypeError = fuelTypes.length ? "" : "Select type";
-  const hasTypeErrors = Boolean(inventoryTypeError || fuelTypeError);
+  // Inventory type and fuel type are optional.
+  const hasTypeErrors = false;
 
   return (
     <form
@@ -156,12 +155,6 @@ export default function FilterEditor({ user, onSaved }) {
               </label>
             </div>
           </details>
-          <div
-            className="field-error"
-            style={{ visibility: inventoryTypeError ? "visible" : "hidden" }}
-          >
-            Select type
-          </div>
         </div>
         <div>
           <label>Fuel type</label>
@@ -188,12 +181,6 @@ export default function FilterEditor({ user, onSaved }) {
               </label>
             </div>
           </details>
-          <div
-            className="field-error"
-            style={{ visibility: fuelTypeError ? "visible" : "hidden" }}
-          >
-            Select type
-          </div>
         </div>
         <div>
           <label>Min Bid ($)</label>

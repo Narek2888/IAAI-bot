@@ -10,6 +10,7 @@ const DEFAULT_ODO_TO = "150000";
 
 const empty = {
   filter_name: "",
+  full_search: "",
   year_from: DEFAULT_YEAR_FROM,
   year_to: DEFAULT_YEAR_TO,
   auction_type: "",
@@ -64,6 +65,7 @@ function fromApiFilter(f) {
   };
   return {
     filter_name: toInputValue(x.filter_name),
+    full_search: toInputValue(x.full_search),
     year_from: useDefaultYearRange
       ? DEFAULT_YEAR_FROM
       : toInputValue(x.year_from),
@@ -89,21 +91,14 @@ export default function Filters({ onTypeErrorsChange }) {
   const [status, setStatus] = useState("");
   const [filtersSavedOpen, setFiltersSavedOpen] = useState(false);
 
-  const inventoryTypeError =
-    Array.isArray(form.inventory_types) && form.inventory_types.length
-      ? ""
-      : "Select type";
-  const fuelTypeError =
-    Array.isArray(form.fuel_types) && form.fuel_types.length
-      ? ""
-      : "Select type";
-  const hasTypeErrors = Boolean(inventoryTypeError || fuelTypeError);
+  // Inventory type and fuel type are optional.
+  const hasTypeErrors = false;
 
   useEffect(() => {
     if (typeof onTypeErrorsChange === "function") {
-      onTypeErrorsChange(hasTypeErrors);
+      onTypeErrorsChange(false);
     }
-  }, [hasTypeErrors, onTypeErrorsChange]);
+  }, [onTypeErrorsChange]);
 
   useEffect(() => {
     let mounted = true;
@@ -187,11 +182,6 @@ export default function Filters({ onTypeErrorsChange }) {
     e.preventDefault();
     setStatus("");
 
-    if (hasTypeErrors) {
-      setStatus("Select type");
-      return;
-    }
-
     const yearFromStr = String(form.year_from || "").trim();
     const yearToStr = String(form.year_to || "").trim();
     const yearFromVal = yearFromStr === "" ? DEFAULT_YEAR_FROM : yearFromStr;
@@ -209,6 +199,7 @@ export default function Filters({ onTypeErrorsChange }) {
 
     const payload = {
       filter_name: form.filter_name || null,
+      full_search: String(form.full_search || "").trim() || null,
       year_from: toNumberOrNull(yearFromVal),
       year_to: toNumberOrNull(yearToVal),
       auction_type: form.auction_type || null,
@@ -240,11 +231,12 @@ export default function Filters({ onTypeErrorsChange }) {
     // Reset UI immediately (so errors show right away)
     setForm({
       filter_name: "",
+      full_search: "",
       year_from: DEFAULT_YEAR_FROM,
       year_to: DEFAULT_YEAR_TO,
       auction_type: "",
-      inventory_types: [], // (any) -> triggers validation error
-      fuel_types: [], // (any) -> triggers validation error
+      inventory_types: [],
+      fuel_types: [],
       min_bid: DEFAULT_MIN_BID,
       max_bid: DEFAULT_MAX_BID,
       odo_from: DEFAULT_ODO_FROM,
@@ -253,6 +245,7 @@ export default function Filters({ onTypeErrorsChange }) {
 
     const payload = {
       filter_name: null,
+      full_search: null,
       year_from: toNumberOrNull(DEFAULT_YEAR_FROM),
       year_to: toNumberOrNull(DEFAULT_YEAR_TO),
       auction_type: null,
@@ -331,6 +324,13 @@ export default function Filters({ onTypeErrorsChange }) {
           onChange={onChange}
         />
 
+        <input
+          name="full_search"
+          placeholder="Search"
+          value={form.full_search}
+          onChange={onChange}
+        />
+
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <label style={{ display: "grid", gap: 4 }}>
             <span>Year from</span>
@@ -359,7 +359,14 @@ export default function Filters({ onTypeErrorsChange }) {
           </label>
         </div>
 
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <div
+          style={{
+            display: "flex",
+            gap: 10,
+            flexWrap: "wrap",
+            alignItems: "flex-start",
+          }}
+        >
           {/* <label style={{ display: "grid", gap: 4 }}>
             <span>Auction type</span>
             <select
@@ -407,12 +414,6 @@ export default function Filters({ onTypeErrorsChange }) {
                 </label>
               </div>
             </details>
-            <div
-              className="field-error"
-              style={{ visibility: inventoryTypeError ? "visible" : "hidden" }}
-            >
-              Select type
-            </div>
           </label>
 
           <label style={{ display: "grid", gap: 4 }}>
@@ -450,12 +451,6 @@ export default function Filters({ onTypeErrorsChange }) {
                 </label>
               </div>
             </details>
-            <div
-              className="field-error"
-              style={{ visibility: fuelTypeError ? "visible" : "hidden" }}
-            >
-              Select type
-            </div>
           </label>
         </div>
 
@@ -512,9 +507,7 @@ export default function Filters({ onTypeErrorsChange }) {
         </div>
 
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-          <button type="submit" disabled={hasTypeErrors}>
-            Save
-          </button>
+          <button type="submit">Save</button>
           <button type="button" onClick={onReset} style={{ fontSize: 12 }}>
             Reset filters
           </button>

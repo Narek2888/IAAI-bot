@@ -113,77 +113,83 @@ const PAYLOAD = {
   ],
 };
 
-const PAYLOAD_NEW = [
-  {
-    Facets: [
-      {
-        Group: "FuelTypeDesc",
-        Value: "Electric",
-      },
-    ],
-    FullSearch: null,
-    LongRanges: null,
-  },
-  {
-    Facets: [
-      {
-        Group: "FuelTypeDesc",
-        Value: "Other",
-      },
-    ],
-    FullSearch: null,
-    LongRanges: null,
-  },
-  {
-    Facets: null,
-    FullSearch: null,
-    LongRanges: [
-      {
-        From: 0,
-        Name: "ODOValue",
-        To: 150000,
-      },
-    ],
-  },
-  {
-    Facets: [
-      {
-        Group: "AuctionType",
-        Value: "Buy Now",
-      },
-    ],
-    FullSearch: null,
-    LongRanges: null,
-  },
-  {
-    Facets: null,
-    FullSearch: null,
-    LongRanges: [
-      {
-        From: 0,
-        Name: "MinimumBidAmount",
-        To: 50000,
-      },
-    ],
-  },
-  {
-    Facets: [
-      {
-        Group: "InventoryTypes",
-        Value: "Automobiles",
-      },
-    ],
-    FullSearch: null,
-    LongRanges: null,
-  },
-  {
-    Facets: [
-      {
-        Group: "InventoryTypes",
-        Value: "Motorcycles",
-      },
-    ],
-    FullSearch: null,
-    LongRanges: null,
-  },
-];
+const PAYLOAD_NEW = {
+  Searches: [
+    {
+      Facets: [{ Group: "AuctionType", Value: "Buy Now" }],
+      FullSearch: null,
+      LongRanges: null,
+    },
+    {
+      Facets: null,
+      FullSearch: null,
+      LongRanges: [{ From: 2023, Name: "Year", To: 2027 }],
+    },
+    {
+      Facets: [{ Group: "InventoryTypes", Value: "Automobiles" }],
+      FullSearch: null,
+      LongRanges: null,
+    },
+    {
+      Facets: null,
+      FullSearch: null,
+      LongRanges: [{ From: 0, Name: "ODOValue", To: 50000 }],
+    },
+    {
+      Facets: [{ Group: "FuelTypeDesc", Value: "Electric" }],
+      FullSearch: null,
+      LongRanges: null,
+    },
+    {
+      Facets: null,
+      FullSearch: null,
+      LongRanges: [{ From: 0, Name: "MinimumBidAmount", To: 5000 }],
+    },
+  ],
+  ZipCode: "",
+  miles: 0,
+  PageSize: 100,
+  CurrentPage: 1,
+  Sort: [
+    { IsGeoSort: false, SortField: "AuctionDateTime", IsDescending: false },
+  ],
+  ShowRecommendations: false,
+  SaleStatusFilters: [{ SaleStatus: 1, IsSelected: true }],
+  BidStatusFilters: [{ BidStatus: 6, IsSelected: true }],
+};
+
+const PAYLOAD_DRAFT = {
+  Searches: [
+    {
+      Facets: [{ Group: "AuctionType", Value: "Buy Now" }],
+      FullSearch: null,
+      LongRanges: null,
+    },
+    {
+      Facets: null,
+      FullSearch: null,
+      LongRanges: [{ From: 2023, Name: "Year", To: 2027 }],
+    },
+    {
+      Facets: null,
+      FullSearch: null,
+      LongRanges: [{ From: 0, Name: "ODOValue", To: 50000 }],
+    },
+    { Facets: null, FullSearch: "tesla", LongRanges: null },
+    {
+      Facets: null,
+      FullSearch: null,
+      LongRanges: [{ From: 0, Name: "MinimumBidAmount", To: 5000 }],
+    },
+  ],
+  ZipCode: "",
+  miles: 0,
+  PageSize: 100,
+  CurrentPage: 1,
+  Sort: [
+    { IsGeoSort: false, SortField: "AuctionDateTime", IsDescending: false },
+  ],
+  ShowRecommendations: false,
+  SaleStatusFilters: [{ SaleStatus: 1, IsSelected: true }],
+  BidStatusFilters: [{ BidStatus: 6, IsSelected: true }],
+};
