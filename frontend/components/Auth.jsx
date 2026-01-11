@@ -1,11 +1,20 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { apiPost, setAuthToken } from "../src/api";
 
-export default function Auth({ onAuth }) {
-  const [isLogin, setIsLogin] = useState(true);
+export default function Auth({
+  onAuth,
+  mode = null, // "login" | "register" | null
+  showModeToggle = true,
+}) {
+  const [isLogin, setIsLogin] = useState(mode ? mode === "login" : true);
   const [form, setForm] = useState({ username: "", email: "", password: "" });
   const [error, setError] = useState("");
   const [showPassword, setShowPassword] = useState(false); // NEW
+
+  useEffect(() => {
+    if (!mode) return;
+    setIsLogin(mode === "login");
+  }, [mode]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -60,29 +69,33 @@ export default function Auth({ onAuth }) {
 
   return (
     <div>
-      <div
-        style={{
-          marginBottom: 8,
-          display: "flex",
-          gap: 16,
-          alignItems: "center",
-        }}
-      >
-        <button
-          type="button"
-          onClick={() => setIsLogin(true)}
-          disabled={isLogin}
+      {showModeToggle && (
+        <div
+          style={{
+            marginBottom: 8,
+            display: "flex",
+            gap: 16,
+            alignItems: "center",
+            justifyContent: "flex-end",
+            width: "100%",
+          }}
         >
-          Log In
-        </button>
-        <button
-          type="button"
-          onClick={() => setIsLogin(false)}
-          disabled={!isLogin}
-        >
-          Register
-        </button>
-      </div>
+          <button
+            type="button"
+            onClick={() => setIsLogin(true)}
+            disabled={isLogin}
+          >
+            Log In
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsLogin(false)}
+            disabled={!isLogin}
+          >
+            Register
+          </button>
+        </div>
+      )}
 
       <form
         onSubmit={handleSubmit}

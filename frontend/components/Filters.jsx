@@ -311,7 +311,11 @@ export default function Filters({ onTypeErrorsChange }) {
             </h3>
             <div style={{ marginBottom: 12 }}>Filters are saved</div>
             <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <button type="button" onClick={() => setFiltersSavedOpen(false)}>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => setFiltersSavedOpen(false)}
+              >
                 OK
               </button>
             </div>

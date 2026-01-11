@@ -26,6 +26,8 @@ function saveUser(user) {
 
 export default function App() {
   const [user, setUser] = useState(null);
+  const [loginModalOpen, setLoginModalOpen] = useState(false);
+  const [registerModalOpen, setRegisterModalOpen] = useState(false);
   const [hasTypeErrors, setHasTypeErrors] = useState(false);
   const [accountModalOpen, setAccountModalOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -54,6 +56,13 @@ export default function App() {
     const u = loadUser();
     if (u) setUser(u);
   }, []);
+
+  // Close auth modals once user logs in.
+  useEffect(() => {
+    if (!user) return;
+    setLoginModalOpen(false);
+    setRegisterModalOpen(false);
+  }, [user]);
 
   // Close dropdown panels (<details class="dropdown">) when clicking elsewhere.
   useEffect(() => {
@@ -85,6 +94,20 @@ export default function App() {
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [accountModalOpen]);
+
+  // Close auth modals on Escape.
+  useEffect(() => {
+    if (!loginModalOpen && !registerModalOpen) return;
+
+    const onKeyDown = (e) => {
+      if (e.key !== "Escape") return;
+      setLoginModalOpen(false);
+      setRegisterModalOpen(false);
+    };
+
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [loginModalOpen, registerModalOpen]);
 
   const onAuth = (u) => {
     setUser(u);
@@ -158,18 +181,199 @@ export default function App() {
     setPasswordChangedOpen(true);
   };
 
-  if (!user) return <Auth onAuth={onAuth} />;
+  if (!user)
+    return (
+      <div style={{ maxWidth: 900, margin: "24px auto" }}>
+        <header
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+          }}
+        >
+          <img
+            src="/media/website-logo.png"
+            alt="Website logo"
+            style={{ height: 32, width: "auto", display: "block" }}
+          />
+
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 12 }}>
+            <button
+              type="button"
+              onClick={() => {
+                setRegisterModalOpen(false);
+                setLoginModalOpen(true);
+              }}
+            >
+              Log In
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setLoginModalOpen(false);
+                setRegisterModalOpen(true);
+              }}
+            >
+              Register
+            </button>
+          </div>
+        </header>
+
+        <div style={{ marginTop: 12 }}>
+          <img
+            src="/media/auta-z-usa-slider-1.webp"
+            alt="Banner"
+            style={{
+              width: "100%",
+              maxHeight: 220,
+              objectFit: "cover",
+              borderRadius: 10,
+              display: "block",
+            }}
+          />
+        </div>
+
+        {loginModalOpen && (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="login-modal-title"
+            onMouseDown={() => setLoginModalOpen(false)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 1000,
+              background: "rgba(0, 0, 0, 0.35)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 16,
+            }}
+          >
+            <div
+              onMouseDown={(e) => e.stopPropagation()}
+              style={{
+                width: "min(520px, 100%)",
+                background: "#fff",
+                borderRadius: 8,
+                padding: 16,
+                boxShadow: "0 6px 20px rgba(0, 0, 0, 0.06)",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: 12,
+                }}
+              >
+                <h3 id="login-modal-title" style={{ margin: 0 }}>
+                  Log In
+                </h3>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => setLoginModalOpen(false)}
+                >
+                  Close
+                </button>
+              </div>
+
+              <div style={{ marginTop: 12 }}>
+                <Auth
+                  mode="login"
+                  showModeToggle={false}
+                  onAuth={(u) => {
+                    onAuth(u);
+                    setLoginModalOpen(false);
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {registerModalOpen && (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="register-modal-title"
+            onMouseDown={() => setRegisterModalOpen(false)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 1000,
+              background: "rgba(0, 0, 0, 0.35)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 16,
+            }}
+          >
+            <div
+              onMouseDown={(e) => e.stopPropagation()}
+              style={{
+                width: "min(520px, 100%)",
+                background: "#fff",
+                borderRadius: 8,
+                padding: 16,
+                boxShadow: "0 6px 20px rgba(0, 0, 0, 0.06)",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: 12,
+                }}
+              >
+                <h3 id="register-modal-title" style={{ margin: 0 }}>
+                  Register
+                </h3>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => setRegisterModalOpen(false)}
+                >
+                  Close
+                </button>
+              </div>
+
+              <div style={{ marginTop: 12 }}>
+                <Auth
+                  mode="register"
+                  showModeToggle={false}
+                  onAuth={(u) => {
+                    onAuth(u);
+                    setRegisterModalOpen(false);
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
 
   return (
     <div style={{ maxWidth: 900, margin: "24px auto" }}>
-      <div
+      <header
         style={{
           display: "flex",
           gap: 12,
           alignItems: "center",
-          justifyContent: "flex-end",
+          justifyContent: "space-between",
         }}
       >
+        <img
+          src="/media/website-logo.png"
+          alt="Website logo"
+          style={{ height: 32, width: "auto", display: "block" }}
+        />
+
         <details className="dropdown" ref={userMenuRef}>
           <summary
             className="dropdown-trigger"
@@ -231,6 +435,20 @@ export default function App() {
             </button>
           </div>
         </details>
+      </header>
+
+      <div style={{ marginTop: 12 }}>
+        <img
+          src="/media/auta-z-usa-slider-1.webp"
+          alt="Banner"
+          style={{
+            width: "100%",
+            maxHeight: 220,
+            objectFit: "cover",
+            borderRadius: 10,
+            display: "block",
+          }}
+        />
       </div>
 
       {accountModalOpen && (
@@ -553,6 +771,7 @@ export default function App() {
             <div style={{ display: "flex", justifyContent: "flex-end" }}>
               <button
                 type="button"
+                className="secondary"
                 onClick={() => setPasswordChangedOpen(false)}
               >
                 OK

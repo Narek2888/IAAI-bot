@@ -132,6 +132,20 @@ router.post("/signin", async (req, res) => {
   return res.json({ ok: true, user: publicUser(user), token });
 });
 
+// LOGOUT (delete current session token)
+router.post("/logout", authRequired, async (req, res) => {
+  try {
+    const token = req.token;
+    if (token) {
+      await db.query("DELETE FROM sessions WHERE token = $1", [token]);
+    }
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ ok: false, msg: "Server error" });
+  }
+});
+
 // Delete current user's account + related sessions
 router.post("/delete", authRequired, (req, res) => {
   try {
