@@ -8,15 +8,15 @@ const USER_KEY = "user";
 const DISMISSED_VERSION_KEY = "dismissedServerVersion";
 
 const APP_VERSION =
-  typeof __GIT_SHA__ !== "undefined" && __GIT_SHA__ ? __GIT_SHA__ : "00000000";
+  typeof __GIT_SHA__ !== "undefined" && __GIT_SHA__ ? __GIT_SHA__ : "0000000";
 
-function normalizeVersion8(v) {
+function normalizeVersion7(v) {
   const s = String(v || "").trim();
-  return (s || "00000000").slice(0, 8);
+  return (s || "0000000").slice(0, 7);
 }
 
 function VersionRow({ version }) {
-  const v = normalizeVersion8(version || APP_VERSION);
+  const v = normalizeVersion7(version || APP_VERSION);
   return (
     <div
       style={{
@@ -116,8 +116,8 @@ export default function App() {
   // Once this client is on the latest version, resume the user's bot (if enabled)
   // exactly once per page load.
   useEffect(() => {
-    const current = normalizeVersion8(APP_VERSION);
-    const next = normalizeVersion8(serverVersion);
+    const current = normalizeVersion7(APP_VERSION);
+    const next = normalizeVersion7(serverVersion);
     if (!user) return;
     if (!next) return;
     if (updateOpen) return;
@@ -154,14 +154,14 @@ export default function App() {
         return;
       }
 
-      const nextServer = normalizeVersion8(res?.version);
-      const current = normalizeVersion8(APP_VERSION);
+      const nextServer = normalizeVersion7(res?.version);
+      const current = normalizeVersion7(APP_VERSION);
       if (cancelled) return;
 
       setServerVersion(nextServer);
 
       if (nextServer && nextServer !== current) {
-        const dismissed = normalizeVersion8(readDismissed());
+        const dismissed = normalizeVersion7(readDismissed());
         if (dismissed !== nextServer) setUpdateOpen(true);
       } else {
         setUpdateOpen(false);
@@ -195,7 +195,7 @@ export default function App() {
   };
 
   const dismissUpdate = () => {
-    const v = normalizeVersion8(serverVersion);
+    const v = normalizeVersion7(serverVersion);
     try {
       if (v) localStorage.setItem(DISMISSED_VERSION_KEY, v);
     } catch {
@@ -206,8 +206,8 @@ export default function App() {
 
   const renderUpdateModal = () => {
     if (!updateOpen) return null;
-    const current = normalizeVersion8(APP_VERSION);
-    const next = normalizeVersion8(serverVersion);
+    const current = normalizeVersion7(APP_VERSION);
+    const next = normalizeVersion7(serverVersion);
 
     return (
       <div

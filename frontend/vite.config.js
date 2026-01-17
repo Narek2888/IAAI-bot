@@ -20,25 +20,25 @@ function getGitSha8() {
   ];
   for (const k of envKeys) {
     const v = process.env[k];
-    if (v) return String(v).trim().slice(0, 8);
+    if (v) return String(v).trim().slice(0, 7);
   }
   try {
-    return execSync("git rev-parse --short=8 HEAD", {
+    return execSync("git rev-parse --short=7 HEAD", {
       stdio: ["ignore", "pipe", "ignore"],
     })
       .toString()
       .trim();
   } catch {
-    return "00000000";
+    return "0000000";
   }
 }
 
-const GIT_SHA_8 = getGitSha8();
+const GIT_SHA_7 = getGitSha8();
 
 export default defineConfig({
   plugins: [react()],
   define: {
-    __GIT_SHA__: JSON.stringify(GIT_SHA_8),
+    __GIT_SHA__: JSON.stringify(GIT_SHA_7),
   },
   server: {
     port: 5173,

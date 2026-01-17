@@ -35,24 +35,24 @@ function getGitSha8() {
   ];
   for (const k of envKeys) {
     const v = process.env[k];
-    if (v) return String(v).trim().slice(0, 8);
+    if (v) return String(v).trim().slice(0, 7);
   }
   try {
-    return execSync("git rev-parse --short=8 HEAD", {
+    return execSync("git rev-parse --short=7 HEAD", {
       stdio: ["ignore", "pipe", "ignore"],
     })
       .toString()
       .trim();
   } catch {
-    return "00000000";
+    return "0000000";
   }
 }
 
-const SERVER_VERSION_8 = getGitSha8();
+const SERVER_VERSION_7 = getGitSha8();
 
 app.get("/api/version", (req, res) => {
   res.setHeader("Cache-Control", "no-store");
-  return res.json({ ok: true, version: SERVER_VERSION_8 });
+  return res.json({ ok: true, version: SERVER_VERSION_7 });
 });
 
 app.use("/api/auth", require("./auth"));
