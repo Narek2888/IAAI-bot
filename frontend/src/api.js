@@ -6,6 +6,11 @@ const TOKEN_KEY = "authToken";
 const inflight = new Map(); // key -> Promise
 const etagCache = new Map(); // url -> { etag, json }
 
+export function resetApiCaches() {
+  inflight.clear();
+  etagCache.clear();
+}
+
 export function setAuthToken(token) {
   authToken = token || null;
   try {
@@ -14,6 +19,9 @@ export function setAuthToken(token) {
   } catch {
     // ignore storage errors
   }
+
+  // Avoid leaking cached GET responses across auth transitions
+  if (!authToken) resetApiCaches();
 }
 
 export function loadTokenFromStorage() {

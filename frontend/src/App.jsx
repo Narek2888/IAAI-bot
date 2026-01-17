@@ -30,8 +30,10 @@ export default function App() {
   const [registerModalOpen, setRegisterModalOpen] = useState(false);
   const [hasTypeErrors, setHasTypeErrors] = useState(false);
   const [accountModalOpen, setAccountModalOpen] = useState(false);
+  const [accountSection, setAccountSection] = useState("password"); // "password" | "email" | "delete"
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [passwordChangedOpen, setPasswordChangedOpen] = useState(false);
+  const [emailChangedOpen, setEmailChangedOpen] = useState(false);
   const userMenuRef = useRef(null);
   const [pwErrors, setPwErrors] = useState({
     currentPassword: "",
@@ -48,6 +50,18 @@ export default function App() {
     next: false,
     confirm: false,
   });
+
+  const [emailForm, setEmailForm] = useState({ newEmail: "" });
+  const [emailOtpOpen, setEmailOtpOpen] = useState(false);
+  const [emailOtpCode, setEmailOtpCode] = useState("");
+  const [emailOtpNonce, setEmailOtpNonce] = useState(null);
+  const [emailOtpError, setEmailOtpError] = useState("");
+  const [emailOtpInfo, setEmailOtpInfo] = useState("");
+  const [emailOtpSending, setEmailOtpSending] = useState(false);
+  const [emailOtpResending, setEmailOtpResending] = useState(false);
+  const [emailOtpVerifying, setEmailOtpVerifying] = useState(false);
+  const [emailOtpResendLeftSec, setEmailOtpResendLeftSec] = useState(0);
+  const EMAIL_OTP_RESEND_SECONDS = 120;
 
   useEffect(() => {
     const token = loadTokenFromStorage();
@@ -87,6 +101,18 @@ export default function App() {
   useEffect(() => {
     if (!accountModalOpen) return;
 
+    setAccountSection("password");
+    setEmailForm({ newEmail: user?.email ?? "" });
+    setEmailOtpOpen(false);
+    setEmailOtpCode("");
+    setEmailOtpNonce(null);
+    setEmailOtpError("");
+    setEmailOtpInfo("");
+    setEmailOtpSending(false);
+    setEmailOtpResending(false);
+    setEmailOtpVerifying(false);
+    setEmailOtpResendLeftSec(0);
+
     const onKeyDown = (e) => {
       if (e.key === "Escape") setAccountModalOpen(false);
     };
@@ -94,6 +120,210 @@ export default function App() {
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [accountModalOpen]);
+
+  // Countdown for email OTP resend
+  useEffect(() => {
+    if (!emailOtpOpen) return;
+    if (emailOtpResendLeftSec <= 0) return;
+
+    const t = setTimeout(() => {
+      setEmailOtpResendLeftSec((s) => (s > 0 ? s - 1 : 0));
+    }, 1000);
+
+    return () => clearTimeout(t);
+  }, [emailOtpOpen, emailOtpResendLeftSec]);
+
+  const normalizeEmail = (e) =>
+    String(e || "")
+      .trim()
+      .toLowerCase();
+
+  const formatTimer = (totalSeconds) => {
+    const s = Math.max(0, Number(totalSeconds) || 0);
+    const mm = String(Math.floor(s / 60)).padStart(2, "0");
+    const ss = String(s % 60).padStart(2, "0");
+    return `${mm}:${ss}`;
+  };
+
+  const openEmailOtpModal = (nonce) => {
+    setEmailOtpNonce(nonce || null);
+    setEmailOtpCode("");
+    setEmailOtpError("");
+    setEmailOtpInfo("");
+    setEmailOtpResendLeftSec(EMAIL_OTP_RESEND_SECONDS);
+    setEmailOtpOpen(true);
+  };
+
+  const closeEmailOtpModal = () => {
+    setEmailOtpOpen(false);
+    setEmailOtpCode("");
+    setEmailOtpNonce(null);
+    setEmailOtpError("");
+    setEmailOtpInfo("");
+    setEmailOtpSending(false);
+    setEmailOtpResending(false);
+    setEmailOtpVerifying(false);
+    setEmailOtpResendLeftSec(0);
+  };
+
+  const requestEmailOtp = async () => {
+    if (emailOtpSending || emailOtpResending || emailOtpVerifying) return;
+
+    const newEmail = normalizeEmail(emailForm.newEmail);
+    if (!newEmail) {
+      alert("Enter a new email");
+      return;
+    }
+    if (normalizeEmail(user?.email) === newEmail) {
+      alert("Email is unchanged");
+      return;
+    }
+
+    setEmailOtpSending(true);
+    setEmailOtpError("");
+    setEmailOtpInfo("");
+
+    let raw;
+    try {
+      raw = await apiPost("/api/auth/change-email/request-otp", {
+        newEmail,
+      });
+    } catch {
+      setEmailOtpSending(false);
+      alert("Failed to send verification code");
+      return;
+    }
+
+    const res = raw?.data ?? raw;
+    if (!res?.ok || !res?.nonce) {
+      setEmailOtpSending(false);
+      alert(res?.msg || "Failed to send verification code");
+      return;
+    }
+
+    setEmailOtpSending(false);
+    openEmailOtpModal(res.nonce);
+  };
+
+  const resendEmailOtp = async () => {
+    if (emailOtpResending || emailOtpSending || emailOtpVerifying) return;
+    if (emailOtpResendLeftSec > 0) return;
+
+    const newEmail = normalizeEmail(emailForm.newEmail);
+    if (!newEmail) {
+      setEmailOtpError("Missing email");
+      return;
+    }
+
+    setEmailOtpResending(true);
+    setEmailOtpError("");
+    setEmailOtpInfo("");
+
+    let raw;
+    try {
+      raw = await apiPost("/api/auth/change-email/request-otp", {
+        newEmail,
+      });
+    } catch {
+      setEmailOtpResending(false);
+      setEmailOtpError("Failed to resend verification code");
+      return;
+    }
+
+    const res = raw?.data ?? raw;
+    if (!res?.ok || !res?.nonce) {
+      setEmailOtpResending(false);
+      setEmailOtpError(res?.msg || "Failed to resend verification code");
+      return;
+    }
+
+    setEmailOtpNonce(res.nonce);
+    setEmailOtpCode("");
+    setEmailOtpResendLeftSec(EMAIL_OTP_RESEND_SECONDS);
+    setEmailOtpResending(false);
+    setEmailOtpInfo("Verification code resent");
+  };
+
+  const verifyEmailOtpAndChange = async () => {
+    if (emailOtpVerifying) return;
+
+    const code = String(emailOtpCode || "").trim();
+    const nonce = emailOtpNonce;
+    if (!/^\d{6}$/.test(code) || !nonce) {
+      setEmailOtpError("Enter the 6-digit code");
+      return;
+    }
+
+    const newEmail = normalizeEmail(emailForm.newEmail);
+    if (!newEmail) {
+      setEmailOtpError("Missing email");
+      return;
+    }
+
+    setEmailOtpVerifying(true);
+    let raw;
+    try {
+      raw = await apiPost("/api/auth/change-email/verify", {
+        newEmail,
+        otp: code,
+        nonce,
+      });
+    } catch {
+      setEmailOtpVerifying(false);
+      setEmailOtpError("Verification failed");
+      return;
+    }
+
+    const res = raw?.data ?? raw;
+    if (!res?.ok || !res?.user) {
+      setEmailOtpVerifying(false);
+      setEmailOtpError(res?.msg || "Invalid verification code");
+      return;
+    }
+
+    const nextUser = { ...(user || {}), ...(res.user || {}) };
+    setUser(nextUser);
+    saveUser(nextUser);
+
+    setEmailOtpVerifying(false);
+    closeEmailOtpModal();
+    setAccountModalOpen(false);
+    setEmailChangedOpen(true);
+  };
+
+  const renderEmailChange = () => (
+    <div
+      style={{
+        border: "1px solid #dcdfe6",
+        borderRadius: 8,
+        padding: 12,
+        background: "#f8fafc",
+      }}
+    >
+      <div style={{ fontWeight: 600, marginBottom: 8 }}>Change email</div>
+      <div style={{ color: "#6b7280", fontSize: 13, marginBottom: 8 }}>
+        Current: {user?.email ?? ""}
+      </div>
+
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <input
+          placeholder="New email"
+          value={emailForm.newEmail}
+          onChange={(e) => {
+            const v = e.target.value;
+            setEmailForm({ newEmail: v });
+          }}
+        />
+        <button
+          type="button"
+          onClick={requestEmailOtp}
+          disabled={emailOtpSending}
+        >
+          {emailOtpSending ? "Sending..." : "Send code"}
+        </button>
+      </div>
+    </div>
+  );
 
   // Close auth modals on Escape.
   useEffect(() => {
@@ -114,6 +344,21 @@ export default function App() {
     saveUser(u);
   };
 
+  const resetClientStateAfterAuthCleared = () => {
+    setAccountModalOpen(false);
+    setAccountSection("password");
+    setDeleteConfirmOpen(false);
+    setEmailOtpOpen(false);
+    setEmailOtpCode("");
+    setEmailOtpNonce(null);
+    setEmailOtpError("");
+    setEmailOtpInfo("");
+    setEmailOtpSending(false);
+    setEmailOtpResending(false);
+    setEmailOtpVerifying(false);
+    setEmailOtpResendLeftSec(0);
+  };
+
   const logout = async () => {
     try {
       await apiPost("/api/auth/logout", {});
@@ -123,6 +368,7 @@ export default function App() {
     setAuthToken(null);
     saveUser(null);
     setUser(null);
+    resetClientStateAfterAuthCleared();
   };
 
   const deleteAccount = async () => {
@@ -136,6 +382,7 @@ export default function App() {
     setAuthToken(null);
     saveUser(null);
     setUser(null);
+    resetClientStateAfterAuthCleared();
   };
 
   const changePassword = async () => {
@@ -500,179 +747,345 @@ export default function App() {
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <div style={{ fontWeight: 600 }}>Change password</div>
-
-              <div style={{ position: "relative" }}>
-                <input
-                  placeholder="Current password"
-                  type={showPw.current ? "text" : "password"}
-                  value={pwForm.currentPassword}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setPwForm((p) => ({ ...p, currentPassword: v }));
-                    if (pwErrors.currentPassword) {
-                      setPwErrors((p) => ({ ...p, currentPassword: "" }));
-                    }
-                  }}
-                  style={{ paddingRight: 44 }}
-                />
-                <button
-                  type="button"
-                  onClick={() =>
-                    setShowPw((p) => ({ ...p, current: !p.current }))
-                  }
-                  aria-label={
-                    showPw.current
-                      ? "Hide current password"
-                      : "Show current password"
-                  }
-                  title={
-                    showPw.current
-                      ? "Hide current password"
-                      : "Show current password"
-                  }
-                  style={{
-                    position: "absolute",
-                    right: 8,
-                    top: "50%",
-                    transform: "translateY(-50%)",
-                    border: "none",
-                    background: "transparent",
-                    cursor: "pointer",
-                    padding: 6,
-                    lineHeight: 1,
-                    fontSize: 16,
-                  }}
-                >
-                  {showPw.current ? "🙈" : "👁️"}
-                </button>
-              </div>
               <div
-                className="field-error"
                 style={{
-                  visibility: pwErrors.currentPassword ? "visible" : "hidden",
+                  display: "flex",
+                  gap: 6,
+                  alignItems: "center",
+                  justifyContent: "flex-start",
                 }}
               >
-                {pwErrors.currentPassword || "_"}
-              </div>
-
-              <div style={{ position: "relative" }}>
-                <input
-                  placeholder="New password"
-                  type={showPw.next ? "text" : "password"}
-                  value={pwForm.newPassword}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setPwForm((p) => ({ ...p, newPassword: v }));
-                    if (pwErrors.newPassword) {
-                      setPwErrors((p) => ({ ...p, newPassword: "" }));
-                    }
-                  }}
-                  style={{ paddingRight: 44 }}
-                />
                 <button
                   type="button"
-                  onClick={() => setShowPw((p) => ({ ...p, next: !p.next }))}
-                  aria-label={
-                    showPw.next ? "Hide new password" : "Show new password"
-                  }
-                  title={
-                    showPw.next ? "Hide new password" : "Show new password"
-                  }
-                  style={{
-                    position: "absolute",
-                    right: 8,
-                    top: "50%",
-                    transform: "translateY(-50%)",
-                    border: "none",
-                    background: "transparent",
-                    cursor: "pointer",
-                    padding: 6,
-                    lineHeight: 1,
-                    fontSize: 16,
-                  }}
+                  onClick={() => setAccountSection("password")}
+                  disabled={accountSection === "password"}
                 >
-                  {showPw.next ? "🙈" : "👁️"}
+                  Change password
                 </button>
-              </div>
-              <div
-                className="field-error"
-                style={{
-                  visibility: pwErrors.newPassword ? "visible" : "hidden",
-                }}
-              >
-                {pwErrors.newPassword || "_"}
-              </div>
-
-              <div style={{ position: "relative" }}>
-                <input
-                  placeholder="Confirm new password"
-                  type={showPw.confirm ? "text" : "password"}
-                  value={pwForm.confirmPassword}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setPwForm((p) => ({ ...p, confirmPassword: v }));
-                    if (pwErrors.confirmPassword) {
-                      setPwErrors((p) => ({ ...p, confirmPassword: "" }));
-                    }
-                  }}
-                  style={{ paddingRight: 44 }}
-                />
                 <button
                   type="button"
-                  onClick={() =>
-                    setShowPw((p) => ({ ...p, confirm: !p.confirm }))
-                  }
-                  aria-label={
-                    showPw.confirm
-                      ? "Hide confirm password"
-                      : "Show confirm password"
-                  }
-                  title={
-                    showPw.confirm
-                      ? "Hide confirm password"
-                      : "Show confirm password"
-                  }
+                  onClick={() => setAccountSection("email")}
+                  disabled={accountSection === "email"}
+                >
+                  Change email
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAccountSection("delete")}
+                  aria-pressed={accountSection === "delete"}
                   style={{
-                    position: "absolute",
-                    right: 8,
-                    top: "50%",
-                    transform: "translateY(-50%)",
-                    border: "none",
-                    background: "transparent",
-                    cursor: "pointer",
-                    padding: 6,
-                    lineHeight: 1,
-                    fontSize: 16,
+                    background: "#ef4444",
+                    color: "#fff",
+                    opacity: accountSection === "delete" ? 0.9 : 1,
+                    outline:
+                      accountSection === "delete"
+                        ? "2px solid rgba(239, 68, 68, 0.35)"
+                        : "none",
                   }}
                 >
-                  {showPw.confirm ? "🙈" : "👁️"}
-                </button>
-              </div>
-              <div
-                className="field-error"
-                style={{
-                  visibility: pwErrors.confirmPassword ? "visible" : "hidden",
-                }}
-              >
-                {pwErrors.confirmPassword || "_"}
-              </div>
-
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <button type="button" onClick={changePassword}>
-                  Save password
+                  Delete account
                 </button>
               </div>
 
-              <div style={{ height: 1, background: "#dcdfe6" }} />
+              {accountSection === "email" && renderEmailChange()}
 
-              <div style={{ fontWeight: 600 }}>Danger zone</div>
+              {accountSection === "password" && (
+                <>
+                  <div style={{ position: "relative" }}>
+                    <input
+                      placeholder="Current password"
+                      type={showPw.current ? "text" : "password"}
+                      value={pwForm.currentPassword}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setPwForm((p) => ({ ...p, currentPassword: v }));
+                        if (pwErrors.currentPassword) {
+                          setPwErrors((p) => ({ ...p, currentPassword: "" }));
+                        }
+                      }}
+                      style={{ paddingRight: 44 }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setShowPw((p) => ({ ...p, current: !p.current }))
+                      }
+                      aria-label={
+                        showPw.current
+                          ? "Hide current password"
+                          : "Show current password"
+                      }
+                      title={
+                        showPw.current
+                          ? "Hide current password"
+                          : "Show current password"
+                      }
+                      style={{
+                        position: "absolute",
+                        right: 8,
+                        top: "50%",
+                        transform: "translateY(-50%)",
+                        border: "none",
+                        background: "transparent",
+                        cursor: "pointer",
+                        padding: 6,
+                        lineHeight: 1,
+                        fontSize: 16,
+                      }}
+                    >
+                      {showPw.current ? "🙈" : "👁️"}
+                    </button>
+                  </div>
+                  <div
+                    className="field-error"
+                    style={{
+                      visibility: pwErrors.currentPassword
+                        ? "visible"
+                        : "hidden",
+                    }}
+                  >
+                    {pwErrors.currentPassword || "_"}
+                  </div>
+
+                  <div style={{ position: "relative" }}>
+                    <input
+                      placeholder="New password"
+                      type={showPw.next ? "text" : "password"}
+                      value={pwForm.newPassword}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setPwForm((p) => ({ ...p, newPassword: v }));
+                        if (pwErrors.newPassword) {
+                          setPwErrors((p) => ({ ...p, newPassword: "" }));
+                        }
+                      }}
+                      style={{ paddingRight: 44 }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setShowPw((p) => ({ ...p, next: !p.next }))
+                      }
+                      aria-label={
+                        showPw.next ? "Hide new password" : "Show new password"
+                      }
+                      title={
+                        showPw.next ? "Hide new password" : "Show new password"
+                      }
+                      style={{
+                        position: "absolute",
+                        right: 8,
+                        top: "50%",
+                        transform: "translateY(-50%)",
+                        border: "none",
+                        background: "transparent",
+                        cursor: "pointer",
+                        padding: 6,
+                        lineHeight: 1,
+                        fontSize: 16,
+                      }}
+                    >
+                      {showPw.next ? "🙈" : "👁️"}
+                    </button>
+                  </div>
+                  <div
+                    className="field-error"
+                    style={{
+                      visibility: pwErrors.newPassword ? "visible" : "hidden",
+                    }}
+                  >
+                    {pwErrors.newPassword || "_"}
+                  </div>
+
+                  <div style={{ position: "relative" }}>
+                    <input
+                      placeholder="Confirm new password"
+                      type={showPw.confirm ? "text" : "password"}
+                      value={pwForm.confirmPassword}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setPwForm((p) => ({ ...p, confirmPassword: v }));
+                        if (pwErrors.confirmPassword) {
+                          setPwErrors((p) => ({ ...p, confirmPassword: "" }));
+                        }
+                      }}
+                      style={{ paddingRight: 44 }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setShowPw((p) => ({ ...p, confirm: !p.confirm }))
+                      }
+                      aria-label={
+                        showPw.confirm
+                          ? "Hide confirm password"
+                          : "Show confirm password"
+                      }
+                      title={
+                        showPw.confirm
+                          ? "Hide confirm password"
+                          : "Show confirm password"
+                      }
+                      style={{
+                        position: "absolute",
+                        right: 8,
+                        top: "50%",
+                        transform: "translateY(-50%)",
+                        border: "none",
+                        background: "transparent",
+                        cursor: "pointer",
+                        padding: 6,
+                        lineHeight: 1,
+                        fontSize: 16,
+                      }}
+                    >
+                      {showPw.confirm ? "🙈" : "👁️"}
+                    </button>
+                  </div>
+                  <div
+                    className="field-error"
+                    style={{
+                      visibility: pwErrors.confirmPassword
+                        ? "visible"
+                        : "hidden",
+                    }}
+                  >
+                    {pwErrors.confirmPassword || "_"}
+                  </div>
+
+                  <div
+                    style={{ display: "flex", gap: 8, alignItems: "center" }}
+                  >
+                    <button type="button" onClick={changePassword}>
+                      Save password
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {accountSection === "delete" && (
+                <>
+                  <div style={{ height: 1, background: "#dcdfe6" }} />
+
+                  <div style={{ fontWeight: 600 }}>Danger zone</div>
+                  <button
+                    type="button"
+                    onClick={() => setDeleteConfirmOpen(true)}
+                    style={{ background: "#ef4444", color: "#fff" }}
+                  >
+                    Delete Account
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {emailOtpOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Email verification"
+          onMouseDown={closeEmailOtpModal}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 1200,
+            background: "rgba(0, 0, 0, 0.35)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+          }}
+        >
+          <div
+            onMouseDown={(e) => e.stopPropagation()}
+            style={{
+              width: "min(420px, 100%)",
+              background: "#fff",
+              borderRadius: 8,
+              padding: 16,
+              boxShadow: "0 6px 20px rgba(0, 0, 0, 0.06)",
+            }}
+          >
+            <div style={{ fontWeight: 700, marginBottom: 8 }}>
+              Verify new email
+            </div>
+            <div style={{ color: "#6b7280", fontSize: 13, marginBottom: 12 }}>
+              We sent a 6-digit code to {normalizeEmail(emailForm.newEmail)}.
+            </div>
+
+            <input
+              placeholder="OTP"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              value={emailOtpCode}
+              onChange={(e) => {
+                const digits = String(e.target.value)
+                  .replace(/\D+/g, "")
+                  .slice(0, 6);
+                setEmailOtpCode(digits);
+                if (emailOtpError) setEmailOtpError("");
+                if (emailOtpInfo) setEmailOtpInfo("");
+              }}
+            />
+
+            <div style={{ marginTop: 8, fontSize: 13, color: "#6b7280" }}>
+              {emailOtpResendLeftSec > 0
+                ? `Resend available in ${formatTimer(emailOtpResendLeftSec)}`
+                : "Didn't get the code? You can resend now."}
+            </div>
+
+            {emailOtpInfo && (
+              <div style={{ color: "#16a34a", marginTop: 6 }}>
+                {emailOtpInfo}
+              </div>
+            )}
+
+            {emailOtpError && (
+              <div style={{ color: "#ef4444", marginTop: 8 }}>
+                {emailOtpError}
+              </div>
+            )}
+
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: 8,
+                marginTop: 12,
+              }}
+            >
               <button
                 type="button"
-                onClick={() => setDeleteConfirmOpen(true)}
-                style={{ background: "#ef4444", color: "#fff" }}
+                className="secondary"
+                onClick={resendEmailOtp}
+                disabled={
+                  emailOtpResending ||
+                  emailOtpSending ||
+                  emailOtpVerifying ||
+                  emailOtpResendLeftSec > 0
+                }
               >
-                Delete Account
+                {emailOtpResending ? "Resending..." : "Resend"}
+              </button>
+              <button
+                type="button"
+                className="secondary"
+                onClick={closeEmailOtpModal}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={verifyEmailOtpAndChange}
+                disabled={
+                  !/^\d{6}$/.test(String(emailOtpCode || "").trim()) ||
+                  emailOtpVerifying
+                }
+              >
+                {emailOtpVerifying ? "Verifying..." : "OK"}
               </button>
             </div>
           </div>
@@ -774,6 +1187,48 @@ export default function App() {
                 className="secondary"
                 onClick={() => setPasswordChangedOpen(false)}
               >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {emailChangedOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="email-changed-title"
+          onMouseDown={() => setEmailChangedOpen(false)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 1100,
+            background: "rgba(0, 0, 0, 0.35)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+          }}
+        >
+          <div
+            onMouseDown={(e) => e.stopPropagation()}
+            style={{
+              width: "min(520px, 100%)",
+              background: "#fff",
+              borderRadius: 8,
+              padding: 16,
+              boxShadow: "0 6px 20px rgba(0, 0, 0, 0.06)",
+            }}
+          >
+            <h3 id="email-changed-title" style={{ marginTop: 0 }}>
+              Email changed
+            </h3>
+            <div style={{ marginBottom: 12 }}>
+              Your email has been updated successfully.
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <button type="button" onClick={() => setEmailChangedOpen(false)}>
                 OK
               </button>
             </div>

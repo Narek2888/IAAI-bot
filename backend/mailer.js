@@ -189,4 +189,36 @@ async function sendVehiclesEmail({ to, subject, vehicles }) {
   });
 }
 
-module.exports = { sendVehiclesEmail };
+async function sendOtpEmail({ to, otp }) {
+  const subject = "Your verification code";
+
+  const apiKey = process.env.SENDGRID_API_KEY;
+  const from = process.env.SENDGRID_FROM;
+
+  // Dev fallback: if SendGrid isn't configured, log the OTP so local dev still works.
+  if (!apiKey || !from) {
+    console.warn(
+      "[mailer] SENDGRID_API_KEY/SENDGRID_FROM not set; OTP email not sent. OTP:",
+      otp
+    );
+    return;
+  }
+
+  sgMail.setApiKey(apiKey);
+
+  const safeOtp = esc(otp);
+  await sgMail.send({
+    to,
+    from,
+    subject,
+    html: `
+      <div style="font-family: Arial, sans-serif;">
+        <p style="margin:0 0 10px 0;">Use this one-time password (OTP) to verify your email:</p>
+        <div style="font-size: 24px; font-weight: 700; letter-spacing: 4px; margin: 10px 0;">${safeOtp}</div>
+        <p style="margin:10px 0 0 0; color:#6b7280; font-size: 12px;">This code expires in 10 minutes.</p>
+      </div>
+    `,
+  });
+}
+
+module.exports = { sendVehiclesEmail, sendOtpEmail };
