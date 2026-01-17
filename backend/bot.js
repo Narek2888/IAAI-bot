@@ -77,6 +77,7 @@ function getState(userId) {
       lastContinuousAt: 0,
 
       lastSeen: {},
+      lastSeenLoaded: false,
       lastCount: 0,
 
       // NEW: status response coalescing
@@ -90,6 +91,35 @@ function getState(userId) {
     });
   }
   return states.get(userId);
+}
+
+async function loadLastSeen(userId) {
+  try {
+    const r = await db.query(
+      "SELECT last_seen FROM bot_states WHERE user_id = $1 LIMIT 1",
+      [userId]
+    );
+    return r.rows[0]?.last_seen && typeof r.rows[0].last_seen === "object"
+      ? r.rows[0].last_seen
+      : {};
+  } catch (e) {
+    // If table doesn't exist yet or query fails, fall back to empty.
+    return {};
+  }
+}
+
+async function saveLastSeen(userId, lastSeen) {
+  try {
+    await db.query(
+      `INSERT INTO bot_states (user_id, last_seen, updated_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (user_id)
+       DO UPDATE SET last_seen = EXCLUDED.last_seen, updated_at = NOW()`,
+      [userId, lastSeen || {}]
+    );
+  } catch {
+    // ignore
+  }
 }
 
 async function refreshContinuousState(userId, st, maxAgeMs = 5000) {
@@ -448,6 +478,11 @@ function extractIaaiData(resp, maxChars = 8000) {
 async function runOnceForUser(userId) {
   const st = getState(userId);
 
+  if (!st.lastSeenLoaded) {
+    st.lastSeen = await loadLastSeen(userId);
+    st.lastSeenLoaded = true;
+  }
+
   // Prevent overlap if interval fires while a request is still running
   if (st.inFlight) {
     st.lastOutput = "IAAI poll skipped (previous poll still running)";
@@ -494,6 +529,7 @@ async function runOnceForUser(userId) {
 
       const { changes, nextSeen } = diffVehicles(st.lastSeen || {}, vehicles);
       st.lastSeen = nextSeen;
+      await saveLastSeen(userId, nextSeen);
 
       if (changes.length > 0) {
         const userRes = await db.query(
@@ -551,6 +587,30 @@ async function runOnceForUser(userId) {
     st.inFlight = false;
   }
 }
+
+// Resume continuous bot for the current user, but only if they previously enabled it.
+// This is used by the frontend when the user accepts an app update.
+router.post("/resume", authRequired, async (req, res) => {
+  const userId = req.user.id;
+  const st = getState(userId);
+  try {
+    const enabled = await getBotContinuous(userId);
+    if (!enabled)
+      return res.json({ ok: true, resumed: false, reason: "disabled" });
+
+    const alreadyRunning = !!(st.running && st.timer);
+    await startContinuousForUser(userId);
+    const nowRunning = !!(st.running && st.timer);
+    return res.json({
+      ok: true,
+      resumed: nowRunning,
+      alreadyRunning,
+    });
+  } catch (e) {
+    console.error("Bot resume failed:", e);
+    return res.status(500).json({ ok: false, msg: "Failed to resume bot" });
+  }
+});
 
 // GET /api/bot/status
 router.get("/status", authRequired, async (req, res) => {

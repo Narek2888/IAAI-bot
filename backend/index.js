@@ -4,6 +4,7 @@ const express = require("express");
 const cors = require("cors");
 const path = require("path");
 const fs = require("fs");
+const { execSync } = require("child_process");
 const { migrate } = require("./migrate");
 
 const app = express();
@@ -15,6 +16,23 @@ app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: "1mb" }));
 
 app.get("/api/health", (req, res) => res.json({ ok: true }));
+
+function getGitSha8() {
+  const fromEnv = process.env.GIT_SHA || process.env.VITE_GIT_SHA;
+  if (fromEnv) return String(fromEnv).trim().slice(0, 8);
+  try {
+    return execSync("git rev-parse --short=8 HEAD").toString().trim();
+  } catch {
+    return "00000000";
+  }
+}
+
+const SERVER_VERSION_8 = getGitSha8();
+
+app.get("/api/version", (req, res) => {
+  res.setHeader("Cache-Control", "no-store");
+  return res.json({ ok: true, version: SERVER_VERSION_8 });
+});
 
 app.use("/api/auth", require("./auth"));
 app.use("/api/filters", require("./filters"));
@@ -41,18 +59,22 @@ app.use("/api", (req, res) => {
 async function start() {
   await migrate();
 
-  // After deploy/restart, resume any per-user continuous bot runs that were
-  // enabled previously (stored in DB).
-  if (typeof botRouter.resumeContinuousBots === "function") {
-    try {
-      const r = await botRouter.resumeContinuousBots();
-      console.log(
-        `Resumed continuous bots: ${r?.resumed ?? 0} (pollMs=${
-          r?.pollMs ?? "?"
-        })`
-      );
-    } catch (e) {
-      console.error("Failed to resume continuous bots:", e);
+  // IMPORTANT:
+  // Do not auto-resume bots on deploy by default. This avoids restarting
+  // everyone at the same time when a new version is deployed.
+  // Opt-in only via BOT_AUTO_RESUME_ON_START=1.
+  if (String(process.env.BOT_AUTO_RESUME_ON_START || "") === "1") {
+    if (typeof botRouter.resumeContinuousBots === "function") {
+      try {
+        const r = await botRouter.resumeContinuousBots();
+        console.log(
+          `Resumed continuous bots: ${r?.resumed ?? 0} (pollMs=${
+            r?.pollMs ?? "?"
+          })`
+        );
+      } catch (e) {
+        console.error("Failed to resume continuous bots:", e);
+      }
     }
   }
 
