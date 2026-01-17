@@ -303,7 +303,7 @@ function buildIaaiPayloadFromUserFilters(u) {
     Searches,
     ZipCode: "",
     miles: 0,
-    PageSize: 100,
+    PageSize: 500,
     CurrentPage: 1,
     Sort: [
       {
@@ -488,8 +488,8 @@ async function runOnceForUser(userId) {
         st.lastOutput += ` | saved html -> ${outPath}`;
       }
 
-      // IMPORTANT: don’t cap below your PageSize (you set PageSize=100)
-      const vehicles = extractVehiclesFromHtml(resp.data, 200);
+      // IMPORTANT: don’t cap below your PageSize (you set PageSize=500)
+      const vehicles = extractVehiclesFromHtml(resp.data, 500);
       st.lastCount = vehicles.length;
 
       const { changes, nextSeen } = diffVehicles(st.lastSeen || {}, vehicles);

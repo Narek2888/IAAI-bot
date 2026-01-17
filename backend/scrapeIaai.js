@@ -150,7 +150,7 @@ function getAny(obj, keys) {
   return null;
 }
 
-function extractVehiclesFromHtml(html, limit = 200) {
+function extractVehiclesFromHtml(html, limit = 500) {
   const $ = cheerio.load(html);
 
   // Strategy A (preferred): DOM rows (contains Stock # / title / Buy Now)

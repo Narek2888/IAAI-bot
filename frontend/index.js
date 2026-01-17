@@ -440,7 +440,7 @@ function buildPayload(filters) {
         ],
       },
     ],
-    PageSize: 100,
+    PageSize: 500,
     CurrentPage: 1,
     Sort: [{ SortField: "TenantSortOrder", IsDescending: false }],
     ShowRecommendations: false,
