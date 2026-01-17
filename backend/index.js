@@ -18,10 +18,31 @@ app.use(express.json({ limit: "1mb" }));
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 
 function getGitSha8() {
-  const fromEnv = process.env.GIT_SHA || process.env.VITE_GIT_SHA;
-  if (fromEnv) return String(fromEnv).trim().slice(0, 8);
+  const envKeys = [
+    // Manual overrides
+    "GIT_SHA",
+    "VITE_GIT_SHA",
+    // Railway
+    "RAILWAY_GIT_COMMIT_SHA",
+    // Common CI/CD providers
+    "GITHUB_SHA",
+    "CI_COMMIT_SHA",
+    "VERCEL_GIT_COMMIT_SHA",
+    "RENDER_GIT_COMMIT",
+    "HEROKU_SLUG_COMMIT",
+    "SOURCE_VERSION",
+    "COMMIT_SHA",
+  ];
+  for (const k of envKeys) {
+    const v = process.env[k];
+    if (v) return String(v).trim().slice(0, 8);
+  }
   try {
-    return execSync("git rev-parse --short=8 HEAD").toString().trim();
+    return execSync("git rev-parse --short=8 HEAD", {
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+      .toString()
+      .trim();
   } catch {
     return "00000000";
   }
