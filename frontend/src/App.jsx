@@ -134,6 +134,9 @@ export default function App() {
   // We intentionally do NOT force-refresh; the user chooses when to upgrade.
   useEffect(() => {
     let cancelled = false;
+    let inFlight = false;
+    let lastCheckAt = 0;
+    const MIN_GAP_MS = 1500;
 
     const readDismissed = () => {
       try {
@@ -147,11 +150,19 @@ export default function App() {
       if (cancelled) return;
       if (document.visibilityState !== "visible") return;
 
+      const now = Date.now();
+      if (inFlight) return;
+      if (now - lastCheckAt < MIN_GAP_MS) return;
+      lastCheckAt = now;
+      inFlight = true;
+
       let res;
       try {
         res = await apiGet("/api/version");
       } catch {
         return;
+      } finally {
+        inFlight = false;
       }
 
       const nextServer = normalizeVersion7(res?.version);
@@ -168,11 +179,25 @@ export default function App() {
       }
     };
 
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") check();
+    };
+
+    const onFocus = () => {
+      if (document.visibilityState === "visible") check();
+    };
+
+    // Initial check on load
     check();
-    const t = setInterval(check, 60 * 1000);
+
+    // Check when user returns to the tab/window
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("focus", onFocus);
+
     return () => {
       cancelled = true;
-      clearInterval(t);
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", onFocus);
     };
   }, []);
 
