@@ -367,6 +367,7 @@ async function fetchUserFilters(userId) {
 async function fetchUserBotSettings(userId) {
   const r = await db.query(
     `SELECT
+      email,
       bot_continuous,
       filter_name,
       full_search,
@@ -478,6 +479,9 @@ function extractIaaiData(resp, maxChars = 8000) {
 async function runOnceForUser(userId) {
   const st = getState(userId);
 
+  let changesCount = 0;
+  let emailed = false;
+
   if (!st.lastSeenLoaded) {
     st.lastSeen = await loadLastSeen(userId);
     st.lastSeenLoaded = true;
@@ -486,7 +490,7 @@ async function runOnceForUser(userId) {
   // Prevent overlap if interval fires while a request is still running
   if (st.inFlight) {
     st.lastOutput = "IAAI poll skipped (previous poll still running)";
-    return { iaai: st.lastIaaiResponse };
+    return { iaai: st.lastIaaiResponse, changesCount: 0, emailed: false };
   }
 
   st.inFlight = true;
@@ -531,6 +535,8 @@ async function runOnceForUser(userId) {
       st.lastSeen = nextSeen;
       await saveLastSeen(userId, nextSeen);
 
+      changesCount = changes.length;
+
       if (changes.length > 0) {
         const userRes = await db.query(
           "SELECT email, username FROM users WHERE id = $1",
@@ -567,6 +573,7 @@ async function runOnceForUser(userId) {
               subject: `IAAI updates for ${user.username} (${changes.length})`,
               vehicles: changes,
             });
+            emailed = true;
             st.lastOutput += ` | emailed ${changes.length} update(s)`;
           } catch (e) {
             console.error("SendGrid error:", e?.response?.body || e);
@@ -582,7 +589,7 @@ async function runOnceForUser(userId) {
       }
     }
 
-    return { iaai: st.lastIaaiResponse };
+    return { iaai: st.lastIaaiResponse, changesCount, emailed };
   } finally {
     st.inFlight = false;
   }
@@ -681,6 +688,7 @@ router.get("/settings", authRequired, async (req, res) => {
     const row = await fetchUserBotSettings(userId);
     const continuousEnabled = !!row?.bot_continuous;
     const filtersSet = hasAnyFiltersSet(row || null);
+    const hasEmail = !!(row?.email && String(row.email).trim());
 
     st.continuousEnabled = continuousEnabled;
     st.lastContinuousAt = Date.now();
@@ -690,6 +698,7 @@ router.get("/settings", authRequired, async (req, res) => {
       bot: {
         continuousEnabled,
         filtersSet,
+        hasEmail,
       },
     });
   } catch (e) {
@@ -707,7 +716,7 @@ router.post("/run", authRequired, async (req, res) => {
   try {
     if (mode === "once") {
       const r = await runOnceForUser(userId);
-      return res.json({ ok: true, iaai: r.iaai });
+      return res.json({ ok: true, iaai: r.iaai, changesCount: r.changesCount });
     }
 
     if (mode === "start") {

@@ -9,6 +9,12 @@ export default function Bot({ disabled = false }) {
     filtersSet: null,
   });
 
+  const [runOnceSuccessOpen, setRunOnceSuccessOpen] = useState(false);
+  const [runOnceLoading, setRunOnceLoading] = useState(false);
+  const [runOnceHasEmail, setRunOnceHasEmail] = useState(null); // null | boolean
+  const [runOnceBusy, setRunOnceBusy] = useState(false);
+  const [runOnceChangesCount, setRunOnceChangesCount] = useState(null); // null | number
+
   const inFlightRef = useRef(false);
   const loopIdRef = useRef(0); // increments to cancel previous loops
   const timeoutRef = useRef(null);
@@ -75,9 +81,50 @@ export default function Bot({ disabled = false }) {
   }, [bot.running, refresh]);
 
   const runOnce = async () => {
-    const r = await apiPost("/api/bot/run?mode=once");
-    if (!r?.ok) return alert(r?.msg || "Failed");
-    await refresh();
+    if (runOnceBusy) return;
+
+    // Open popup immediately, show spinner while working.
+    setRunOnceSuccessOpen(true);
+    setRunOnceLoading(true);
+    setRunOnceHasEmail(null);
+    setRunOnceChangesCount(null);
+    setRunOnceBusy(true);
+
+    const minSpinnerMs = 650;
+    const startedAt = Date.now();
+
+    try {
+      const r = await apiPost("/api/bot/run?mode=once");
+      if (!r?.ok) {
+        setRunOnceSuccessOpen(false);
+        setRunOnceLoading(false);
+        setRunOnceHasEmail(null);
+        setRunOnceChangesCount(null);
+        return alert(r?.msg || "Failed");
+      }
+
+      const c = Number(r?.changesCount);
+      setRunOnceChangesCount(Number.isFinite(c) ? c : 0);
+
+      try {
+        const settings = await apiGet("/api/bot/settings");
+        const hasEmail = !!(settings?.ok && settings?.bot?.hasEmail);
+        setRunOnceHasEmail(hasEmail);
+      } catch {
+        // If we can't verify, treat as not configured to avoid misleading message.
+        setRunOnceHasEmail(false);
+      }
+
+      await refresh();
+    } finally {
+      const elapsed = Date.now() - startedAt;
+      const remaining = Math.max(0, minSpinnerMs - elapsed);
+      if (remaining) {
+        await new Promise((r) => setTimeout(r, remaining));
+      }
+      setRunOnceLoading(false);
+      setRunOnceBusy(false);
+    }
   };
 
   const start = async () => {
@@ -94,12 +141,18 @@ export default function Bot({ disabled = false }) {
 
   return (
     <div style={{ marginTop: 16 }}>
+      <style>{`
+        @keyframes botSpinner {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+      `}</style>
       <h3>Bot</h3>
       <div>Running: {String(bot.running)}</div>
       <div>Auto-resume (saved): {String(bot.continuousEnabled)}</div>
 
       <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
-        <button onClick={runOnce} disabled={disabled}>
+        <button onClick={runOnce} disabled={disabled || runOnceBusy}>
           Run once
         </button>
         <button onClick={start} disabled={bot.running || disabled}>
@@ -109,6 +162,93 @@ export default function Bot({ disabled = false }) {
           Stop
         </button>
       </div>
+
+      {runOnceSuccessOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Run once success"
+          onMouseDown={() => {
+            setRunOnceSuccessOpen(false);
+            setRunOnceLoading(false);
+            setRunOnceHasEmail(null);
+            setRunOnceChangesCount(null);
+          }}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 1500,
+            background: "rgba(0, 0, 0, 0.35)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+          }}
+        >
+          <div
+            onMouseDown={(e) => e.stopPropagation()}
+            style={{
+              width: "min(520px, 100%)",
+              background: "#fff",
+              borderRadius: 8,
+              padding: 16,
+              boxShadow: "0 6px 20px rgba(0, 0, 0, 0.06)",
+            }}
+          >
+            <div style={{ fontWeight: 700, marginBottom: 8 }}>Success</div>
+            {runOnceLoading ? (
+              <div
+                style={{
+                  marginBottom: 12,
+                  display: "flex",
+                  gap: 10,
+                  alignItems: "center",
+                  color: "#6b7280",
+                }}
+              >
+                <div
+                  aria-hidden="true"
+                  style={{
+                    width: 18,
+                    height: 18,
+                    borderRadius: "50%",
+                    border: "3px solid #e5e7eb",
+                    borderTopColor: "#3b82f6",
+                    animation: "botSpinner 0.9s linear infinite",
+                  }}
+                />
+                <div>The request is accepted. Working on it.</div>
+              </div>
+            ) : (runOnceChangesCount ?? 0) <= 0 ? (
+              <div style={{ marginBottom: 12 }}>
+                There are no updates. Change filters for new data.
+              </div>
+            ) : runOnceHasEmail ? (
+              <div style={{ marginBottom: 12 }}>
+                Run once was made successfully. Check your email.
+              </div>
+            ) : (
+              <div style={{ marginBottom: 12 }}>
+                Updates were found, but your email is not configured. Please set
+                your email in Manage account.
+              </div>
+            )}
+            <div style={{ display: "flex", justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setRunOnceSuccessOpen(false);
+                  setRunOnceLoading(false);
+                  setRunOnceHasEmail(null);
+                  setRunOnceChangesCount(null);
+                }}
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

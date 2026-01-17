@@ -15,8 +15,8 @@ function normalizeVersion8(v) {
   return (s || "00000000").slice(0, 8);
 }
 
-function VersionRow() {
-  const v = String(APP_VERSION || "00000000").slice(0, 8);
+function VersionRow({ version }) {
+  const v = normalizeVersion8(version || APP_VERSION);
   return (
     <div
       style={{
@@ -792,7 +792,7 @@ export default function App() {
           )}
         </div>
         {renderUpdateModal()}
-        <VersionRow />
+        <VersionRow version={serverVersion || APP_VERSION} />
       </>
     );
 
@@ -1441,7 +1441,7 @@ export default function App() {
         <Bot disabled={hasTypeErrors} />
       </div>
       {renderUpdateModal()}
-      <VersionRow />
+      <VersionRow version={serverVersion || APP_VERSION} />
     </>
   );
 }
