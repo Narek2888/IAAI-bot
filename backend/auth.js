@@ -68,7 +68,7 @@ async function cleanupExpiredOtps() {
   // best-effort cleanup
   try {
     await db.query(
-      "DELETE FROM email_otps WHERE expires_at < now() - interval '1 hour'"
+      "DELETE FROM email_otps WHERE expires_at < now() - interval '1 hour'",
     );
   } catch {
     // ignore
@@ -96,7 +96,7 @@ router.post("/change-email/request-otp", authRequired, async (req, res) => {
     // Optional safety: prevent two accounts sharing the same email
     const existingEmail = await db.query(
       "SELECT id FROM users WHERE lower(email) = $1 AND id <> $2 LIMIT 1",
-      [emailNorm, userId]
+      [emailNorm, userId],
     );
     if (existingEmail.rows[0]) {
       return res.status(400).json({ ok: false, msg: "Email already in use" });
@@ -110,12 +110,12 @@ router.post("/change-email/request-otp", authRequired, async (req, res) => {
     // Replace any active OTPs for this user/purpose
     await db.query(
       "DELETE FROM email_otps WHERE user_id = $1 AND purpose = $2",
-      [userId, "change_email"]
+      [userId, "change_email"],
     );
 
     await db.query(
       "INSERT INTO email_otps (email, user_id, purpose, nonce, otp_hash, expires_at) VALUES ($1, $2, $3, $4, $5, now() + ($6 || ' minutes')::interval)",
-      [emailNorm, userId, "change_email", nonce, hash, String(ttlMinutes)]
+      [emailNorm, userId, "change_email", nonce, hash, String(ttlMinutes)],
     );
 
     await sendOtpEmail({ to: emailNorm, otp });
@@ -142,7 +142,7 @@ router.post("/change-email/verify", authRequired, async (req, res) => {
     const expectedHash = otpHash({ nonce: String(nonce), otp: String(otp) });
     const otpRow = await db.query(
       "SELECT id, otp_hash, attempts, expires_at FROM email_otps WHERE nonce = $1 AND user_id = $2 AND purpose = $3 AND email = $4 LIMIT 1",
-      [String(nonce), userId, "change_email", emailNorm]
+      [String(nonce), userId, "change_email", emailNorm],
     );
 
     const rec = otpRow.rows[0];
@@ -164,7 +164,7 @@ router.post("/change-email/verify", authRequired, async (req, res) => {
     if (String(rec.otp_hash) !== expectedHash) {
       await db.query(
         "UPDATE email_otps SET attempts = attempts + 1 WHERE id = $1",
-        [rec.id]
+        [rec.id],
       );
       return res.status(400).json({ ok: false, msg: "Invalid OTP" });
     }
@@ -175,7 +175,7 @@ router.post("/change-email/verify", authRequired, async (req, res) => {
     // enforce uniqueness again at verify-time
     const existingEmail = await db.query(
       "SELECT id FROM users WHERE lower(email) = $1 AND id <> $2 LIMIT 1",
-      [emailNorm, userId]
+      [emailNorm, userId],
     );
     if (existingEmail.rows[0]) {
       return res.status(400).json({ ok: false, msg: "Email already in use" });
@@ -183,7 +183,7 @@ router.post("/change-email/verify", authRequired, async (req, res) => {
 
     const updated = await db.query(
       "UPDATE users SET email = $1 WHERE id = $2 RETURNING *",
-      [emailNorm, userId]
+      [emailNorm, userId],
     );
 
     return res.json({ ok: true, user: publicUser(updated.rows[0]) });
@@ -209,7 +209,7 @@ router.post("/signup/request-otp", async (req, res) => {
     // Prevent duplicates ignoring case
     const existing = await db.query(
       "SELECT id FROM users WHERE lower(username) = $1 LIMIT 1",
-      [usernameNorm]
+      [usernameNorm],
     );
     if (existing.rows[0]) {
       return res.status(400).json({ ok: false, msg: "User already exists" });
@@ -223,12 +223,12 @@ router.post("/signup/request-otp", async (req, res) => {
     // Replace any active OTPs for this email/username (simple anti-spam)
     await db.query(
       "DELETE FROM email_otps WHERE email = $1 AND username = $2",
-      [emailNorm, usernameNorm]
+      [emailNorm, usernameNorm],
     );
 
     await db.query(
       "INSERT INTO email_otps (email, username, nonce, otp_hash, expires_at) VALUES ($1, $2, $3, $4, now() + ($5 || ' minutes')::interval)",
-      [emailNorm, usernameNorm, nonce, hash, String(ttlMinutes)]
+      [emailNorm, usernameNorm, nonce, hash, String(ttlMinutes)],
     );
 
     await sendOtpEmail({ to: emailNorm, otp });
@@ -239,27 +239,49 @@ router.post("/signup/request-otp", async (req, res) => {
   }
 });
 
-// Forgot password: request OTP (by username or email)
+// Forgot password: request OTP
 router.post("/forgot-password/request-otp", async (req, res) => {
-  const { usernameOrEmail } = req.body || {};
+  const { usernameOrEmail, username, email } = req.body || {};
   const q = String(usernameOrEmail || "").trim();
-  if (!q) {
-    return res.status(400).json({ ok: false, msg: "Missing usernameOrEmail" });
+  const u = String(username || "").trim();
+  const e = String(email || "").trim();
+
+  const hasPair = !!u && !!e;
+  if (!hasPair && !q) {
+    return res
+      .status(400)
+      .json({ ok: false, msg: "Missing usernameOrEmail or username+email" });
   }
 
   try {
     await cleanupExpiredOtps();
 
-    const qNorm = q.toLowerCase();
-    const userRes = await db.query(
-      "SELECT id, email FROM users WHERE lower(username) = $1 OR lower(email) = $1 LIMIT 1",
-      [qNorm]
-    );
-    const user = userRes.rows[0];
+    let user;
+    if (hasPair) {
+      const usernameNorm = normalizeUsername(u);
+      const emailNorm = normalizeEmail(e);
+      const userRes = await db.query(
+        "SELECT id, email FROM users WHERE lower(username) = $1 AND lower(email) = $2 LIMIT 1",
+        [usernameNorm, emailNorm],
+      );
+      user = userRes.rows[0];
+      if (!user) {
+        return res
+          .status(400)
+          .json({ ok: false, msg: "Invalid username or email" });
+      }
+    } else {
+      const qNorm = q.toLowerCase();
+      const userRes = await db.query(
+        "SELECT id, email FROM users WHERE lower(username) = $1 OR lower(email) = $1 LIMIT 1",
+        [qNorm],
+      );
+      user = userRes.rows[0];
 
-    // Do not leak whether an account exists.
-    if (!user) {
-      return res.json({ ok: true });
+      // Do not leak whether an account exists.
+      if (!user) {
+        return res.json({ ok: true });
+      }
     }
 
     const userId = user.id;
@@ -272,12 +294,12 @@ router.post("/forgot-password/request-otp", async (req, res) => {
 
     await db.query(
       "DELETE FROM email_otps WHERE user_id = $1 AND purpose = $2",
-      [userId, "reset_password"]
+      [userId, "reset_password"],
     );
 
     await db.query(
       "INSERT INTO email_otps (email, user_id, purpose, nonce, otp_hash, expires_at) VALUES ($1, $2, $3, $4, $5, now() + ($6 || ' minutes')::interval)",
-      [emailNorm, userId, "reset_password", nonce, hash, String(ttlMinutes)]
+      [emailNorm, userId, "reset_password", nonce, hash, String(ttlMinutes)],
     );
 
     await sendOtpEmail({ to: emailNorm, otp });
@@ -301,7 +323,7 @@ router.post("/forgot-password/reset", async (req, res) => {
     const expectedHash = otpHash({ nonce: String(nonce), otp: String(otp) });
     const otpRow = await db.query(
       "SELECT id, otp_hash, attempts, expires_at, user_id FROM email_otps WHERE nonce = $1 AND purpose = $2 LIMIT 1",
-      [String(nonce), "reset_password"]
+      [String(nonce), "reset_password"],
     );
 
     const rec = otpRow.rows[0];
@@ -323,7 +345,7 @@ router.post("/forgot-password/reset", async (req, res) => {
     if (String(rec.otp_hash) !== expectedHash) {
       await db.query(
         "UPDATE email_otps SET attempts = attempts + 1 WHERE id = $1",
-        [rec.id]
+        [rec.id],
       );
       return res.status(400).json({ ok: false, msg: "Invalid OTP" });
     }
@@ -374,7 +396,7 @@ router.post("/signup", async (req, res) => {
       const expectedHash = otpHash({ nonce: String(nonce), otp: String(otp) });
       const otpRow = await db.query(
         "SELECT id, otp_hash, attempts, expires_at, username FROM email_otps WHERE nonce = $1 AND email = $2 LIMIT 1",
-        [String(nonce), emailNorm]
+        [String(nonce), emailNorm],
       );
 
       const rec = otpRow.rows[0];
@@ -400,7 +422,7 @@ router.post("/signup", async (req, res) => {
       if (String(rec.otp_hash) !== expectedHash) {
         await db.query(
           "UPDATE email_otps SET attempts = attempts + 1 WHERE id = $1",
-          [rec.id]
+          [rec.id],
         );
         return res.status(400).json({ ok: false, msg: "Invalid OTP" });
       }
@@ -412,7 +434,7 @@ router.post("/signup", async (req, res) => {
     // Prevent duplicates ignoring case, even if the DB constraint is case-sensitive.
     const existing = await db.query(
       "SELECT id FROM users WHERE lower(username) = $1 LIMIT 1",
-      [usernameNorm]
+      [usernameNorm],
     );
     if (existing.rows[0]) {
       return res.status(400).json({ ok: false, msg: "User already exists" });
@@ -421,14 +443,14 @@ router.post("/signup", async (req, res) => {
     const { user, token } = await db.tx(async (client) => {
       const inserted = await client.query(
         "INSERT INTO users (username, email, password) VALUES ($1, $2, $3) RETURNING *",
-        [usernameNorm, emailNorm, hash]
+        [usernameNorm, emailNorm, hash],
       );
       const createdUser = inserted.rows[0];
 
       const newToken = makeToken();
       await client.query(
         "INSERT INTO sessions (token, user_id, created_at) VALUES ($1, $2, $3)",
-        [newToken, createdUser.id, Date.now()]
+        [newToken, createdUser.id, Date.now()],
       );
 
       return { user: createdUser, token: newToken };
@@ -459,7 +481,7 @@ router.post("/signin", async (req, res) => {
     const usernameNorm = normalizeUsername(username);
     const r = await db.query(
       "SELECT * FROM users WHERE lower(username) = $1 LIMIT 1",
-      [usernameNorm]
+      [usernameNorm],
     );
     user = r.rows[0];
   } catch (e) {
@@ -478,7 +500,7 @@ router.post("/signin", async (req, res) => {
   try {
     await db.query(
       "INSERT INTO sessions (token, user_id, created_at) VALUES ($1, $2, $3)",
-      [token, user.id, Date.now()]
+      [token, user.id, Date.now()],
     );
   } catch (e) {
     console.error(e);

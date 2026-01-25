@@ -15,6 +15,12 @@ export default function Auth({
   });
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
+  const [usernameError, setUsernameError] = useState("");
+  const [emailError, setEmailError] = useState("");
+  const [passwordError, setPasswordError] = useState("");
+  const [confirmPasswordError, setConfirmPasswordError] = useState("");
+  const [loginUsernameError, setLoginUsernameError] = useState("");
+  const [loginPasswordError, setLoginPasswordError] = useState("");
   const [showPassword, setShowPassword] = useState(false); // NEW
   const [otpOpen, setOtpOpen] = useState(false);
   const [otpCode, setOtpCode] = useState("");
@@ -29,10 +35,13 @@ export default function Auth({
   // Forgot password flow
   const [fpOpen, setFpOpen] = useState(false);
   const [fpIdentifier, setFpIdentifier] = useState("");
+  const [fpUsername, setFpUsername] = useState("");
   const [fpNonce, setFpNonce] = useState(null);
   const [fpOtp, setFpOtp] = useState("");
   const [fpNewPassword, setFpNewPassword] = useState("");
   const [fpConfirmPassword, setFpConfirmPassword] = useState("");
+  const [fpUsernameError, setFpUsernameError] = useState("");
+  const [fpEmailError, setFpEmailError] = useState("");
   const [fpError, setFpError] = useState("");
   const [fpInfo, setFpInfo] = useState("");
   const [fpSending, setFpSending] = useState(false);
@@ -74,7 +83,49 @@ export default function Auth({
     setFpResendLeftSec(0);
 
     setInfo("");
+    setUsernameError("");
+    setEmailError("");
+    setPasswordError("");
+    setConfirmPasswordError("");
+    setLoginUsernameError("");
+    setLoginPasswordError("");
   }, [isLogin]);
+
+  const isValidEmailFormat = (email) => {
+    const s = String(email || "").trim();
+    if (!s) return false;
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
+  };
+
+  const getUsernameValidationError = (username) => {
+    const s = String(username || "").trim();
+    if (!s) return "";
+
+    if (!/^[A-Za-z0-9]+$/.test(s)) {
+      return "Numbers and latin letters are allowed";
+    }
+
+    if (s.length < 2 || s.length > 20) {
+      return "Username must be 2-20 characters";
+    }
+
+    return "";
+  };
+
+  const isValidUsernameFormat = (username) =>
+    !getUsernameValidationError(username);
+
+  const getPasswordValidationError = (password) => {
+    const s = String(password ?? "");
+    if (!s) return "";
+
+    // Allow any characters, enforce length only.
+    if (!/^[\s\S]{6,18}$/.test(s)) {
+      return "Password lentgh must be 6-18";
+    }
+
+    return "";
+  };
 
   // Countdown timer for resend.
   useEffect(() => {
@@ -109,6 +160,53 @@ export default function Auth({
     if (otpInfo) setOtpInfo("");
     if (fpError) setFpError("");
     if (fpInfo) setFpInfo("");
+    if (name === "username" && usernameError) setUsernameError("");
+    if (name === "email" && emailError) setEmailError("");
+    if (name === "password" && passwordError) setPasswordError("");
+    if (name === "confirmPassword" && confirmPasswordError)
+      setConfirmPasswordError("");
+
+    if (isLogin) {
+      if (name === "username" && loginUsernameError) setLoginUsernameError("");
+      if (name === "password" && loginPasswordError) setLoginPasswordError("");
+    }
+  };
+
+  const handleUsernameBlur = () => {
+    if (isLogin) return;
+    const s = String(form.username || "").trim();
+    if (!s) {
+      setUsernameError("Required filed");
+      return;
+    }
+    setUsernameError(getUsernameValidationError(s));
+  };
+
+  const handleEmailBlur = () => {
+    if (isLogin) return;
+    const s = String(form.email || "").trim();
+    if (!s) {
+      setEmailError("Required filed");
+      return;
+    }
+    setEmailError(isValidEmailFormat(s) ? "" : "Invalid format");
+  };
+
+  const handlePasswordBlur = () => {
+    if (isLogin) return;
+    const s = String(form.password || "").trim();
+    if (!s) {
+      setPasswordError("Required filed");
+      return;
+    }
+
+    setPasswordError(getPasswordValidationError(form.password));
+  };
+
+  const handleConfirmPasswordBlur = () => {
+    if (isLogin) return;
+    const s = String(form.confirmPassword || "").trim();
+    setConfirmPasswordError(s ? "" : "Required filed");
   };
 
   const normalizeUsername = (u) =>
@@ -118,10 +216,13 @@ export default function Auth({
 
   const openForgotPassword = () => {
     setFpIdentifier(String(form.username || "").trim());
+    setFpUsername(String(form.username || "").trim());
     setFpNonce(null);
     setFpOtp("");
     setFpNewPassword("");
     setFpConfirmPassword("");
+    setFpUsernameError("");
+    setFpEmailError("");
     setFpError("");
     setFpInfo("");
     setFpSending(false);
@@ -137,6 +238,9 @@ export default function Auth({
     setFpOtp("");
     setFpNewPassword("");
     setFpConfirmPassword("");
+    setFpUsername("");
+    setFpUsernameError("");
+    setFpEmailError("");
     setFpError("");
     setFpInfo("");
     setFpSending(false);
@@ -145,11 +249,38 @@ export default function Auth({
     setFpResendLeftSec(0);
   };
 
+  const handleFpUsernameBlur = () => {
+    const s = String(fpUsername || "").trim();
+    setFpUsernameError(s ? "" : "Required field");
+  };
+
+  const handleFpEmailBlur = () => {
+    const s = String(fpIdentifier || "").trim();
+    if (!s) {
+      setFpEmailError("Required field");
+      return;
+    }
+
+    setFpEmailError(isValidEmailFormat(s) ? "" : "Invalid format");
+  };
+
   const requestForgotOtp = async () => {
     if (fpSending || fpResending || fpResetting) return;
+
+    const u = String(fpUsername || "").trim();
+    if (!u) {
+      setFpUsernameError("Required field");
+      return;
+    }
+
     const q = String(fpIdentifier || "").trim();
     if (!q) {
-      setFpError("Enter username or email");
+      setFpEmailError("Required field");
+      return;
+    }
+
+    if (!isValidEmailFormat(q)) {
+      setFpEmailError("Invalid format");
       return;
     }
 
@@ -160,7 +291,8 @@ export default function Auth({
     let raw;
     try {
       raw = await apiPost("/api/auth/forgot-password/request-otp", {
-        usernameOrEmail: q,
+        username: u,
+        email: q,
       });
     } catch {
       setFpSending(false);
@@ -171,17 +303,11 @@ export default function Auth({
     const res = raw?.data ?? raw;
     setFpSending(false);
 
-    // Avoid leaking: backend may return ok:true without a nonce.
     if (res?.ok && res?.nonce) {
       setFpNonce(res.nonce);
       setFpOtp("");
       setFpResendLeftSec(FP_RESEND_SECONDS);
       setFpInfo("Verification code sent");
-      return;
-    }
-
-    if (res?.ok) {
-      setFpInfo("If the account exists, a code was sent to its email.");
       return;
     }
 
@@ -191,9 +317,20 @@ export default function Auth({
   const resendForgotOtp = async () => {
     if (fpResending || fpSending || fpResetting) return;
     if (fpResendLeftSec > 0) return;
+
+    const u = String(fpUsername || "").trim();
+    if (!u) {
+      setFpUsernameError("Required field");
+      return;
+    }
     const q = String(fpIdentifier || "").trim();
     if (!q) {
-      setFpError("Enter username or email");
+      setFpEmailError("Required field");
+      return;
+    }
+
+    if (!isValidEmailFormat(q)) {
+      setFpEmailError("Invalid format");
       return;
     }
 
@@ -204,7 +341,8 @@ export default function Auth({
     let raw;
     try {
       raw = await apiPost("/api/auth/forgot-password/request-otp", {
-        usernameOrEmail: q,
+        username: u,
+        email: q,
       });
     } catch {
       setFpResending(false);
@@ -220,11 +358,6 @@ export default function Auth({
       setFpOtp("");
       setFpResendLeftSec(FP_RESEND_SECONDS);
       setFpInfo("Verification code resent");
-      return;
-    }
-
-    if (res?.ok) {
-      setFpInfo("If the account exists, a code was sent to its email.");
       return;
     }
 
@@ -322,9 +455,20 @@ export default function Auth({
     if (otpResendLeftSec > 0) return;
 
     const usernameNorm = normalizeUsername(form.username);
+    const usernameValidationError = getUsernameValidationError(form.username);
+    if (usernameValidationError) {
+      setUsernameError(usernameValidationError);
+      setOtpError(usernameValidationError);
+      return;
+    }
     const email = String(form.email || "").trim();
     if (!usernameNorm || !email) {
       setOtpError("Missing username/email");
+      return;
+    }
+    if (!isValidEmailFormat(email)) {
+      setEmailError("Invalid format");
+      setOtpError("Invalid format");
       return;
     }
 
@@ -362,6 +506,18 @@ export default function Auth({
     e.preventDefault();
     setError("");
 
+    if (isLogin) {
+      const u = String(form.username || "").trim();
+      const p = String(form.password || "").trim();
+      const missingUsername = !u;
+      const missingPassword = !p;
+
+      setLoginUsernameError(missingUsername ? "Required field" : "");
+      setLoginPasswordError(missingPassword ? "Required field" : "");
+
+      if (missingUsername || missingPassword) return;
+    }
+
     if (!isLogin && form.password !== form.confirmPassword) {
       setError("Passwords do not match");
       return;
@@ -373,12 +529,28 @@ export default function Auth({
     // 1) request OTP and open popup
     // 2) user enters OTP and we complete signup
     if (!isLogin) {
+      const passwordValidationError = getPasswordValidationError(form.password);
+      if (passwordValidationError) {
+        setPasswordError(passwordValidationError);
+        return;
+      }
+
+      const usernameValidationError = getUsernameValidationError(form.username);
+      if (usernameValidationError) {
+        setUsernameError(usernameValidationError);
+        return;
+      }
+      const email = String(form.email || "").trim();
+      if (!isValidEmailFormat(email)) {
+        setEmailError("Invalid format");
+        return;
+      }
       setOtpSending(true);
       let rawOtp;
       try {
         rawOtp = await apiPost("/api/auth/signup/request-otp", {
           username: usernameNorm,
-          email: form.email,
+          email,
         });
       } catch {
         setOtpSending(false);
@@ -418,6 +590,8 @@ export default function Auth({
     if (username && token) {
       setAuthToken(token);
       setError("");
+      setLoginUsernameError("");
+      setLoginPasswordError("");
 
       if (typeof onAuth === "function") {
         onAuth(user);
@@ -441,6 +615,19 @@ export default function Auth({
     }
 
     const usernameNorm = normalizeUsername(form.username);
+    const usernameValidationError = getUsernameValidationError(form.username);
+    if (usernameValidationError) {
+      setUsernameError(usernameValidationError);
+      setOtpError(usernameValidationError);
+      return;
+    }
+
+    const passwordValidationError = getPasswordValidationError(form.password);
+    if (passwordValidationError) {
+      setPasswordError(passwordValidationError);
+      setOtpError(passwordValidationError);
+      return;
+    }
 
     setOtpVerifying(true);
     let raw;
@@ -487,8 +674,13 @@ export default function Auth({
     (!isLogin &&
       (!form.password ||
         !form.confirmPassword ||
+        !!passwordError ||
+        !!confirmPasswordError ||
         passwordMismatch ||
+        !form.username ||
+        !!usernameError ||
         !form.email ||
+        !!emailError ||
         otpSending ||
         otpOpen)) ||
     (isLogin && false);
@@ -527,67 +719,71 @@ export default function Auth({
 
       <form
         onSubmit={handleSubmit}
+        noValidate
         style={{ display: "flex", flexDirection: "column", gap: 12 }}
       >
-        <input
-          name="username"
-          placeholder="Username"
-          value={form.username}
-          onChange={handleChange}
-          required
-        />
-
-        {!isLogin && (
-          <input
-            name="email"
-            placeholder="Email"
-            value={form.email}
-            onChange={handleChange}
-            required
-          />
-        )}
-
-        {/* Password with eye toggle */}
-        <div
-          style={{
-            position: "relative",
-            display: "inline-block",
-            width: "100%",
-          }}
-        >
-          <input
-            name="password"
-            placeholder="Password"
-            type={showPassword ? "text" : "password"}
-            value={form.password}
-            onChange={handleChange}
-            required
-            style={{ paddingRight: 44, width: "100%" }}
-          />
-
-          <button
-            type="button"
-            onClick={() => setShowPassword((v) => !v)}
-            aria-label={showPassword ? "Hide password" : "Show password"}
-            title={showPassword ? "Hide password" : "Show password"}
-            style={{
-              position: "absolute",
-              right: 8,
-              top: "50%",
-              transform: "translateY(-50%)",
-              border: "none",
-              background: "transparent",
-              cursor: "pointer",
-              padding: 6,
-              lineHeight: 1,
-              fontSize: 16,
-            }}
+        <div style={{ display: "grid", gap: 6 }}>
+          <label
+            htmlFor="auth-username"
+            style={{ fontSize: 13, color: "#374151" }}
           >
-            {showPassword ? "🙈" : "👁️"}
-          </button>
+            Username {!isLogin && <span style={{ color: "#ef4444" }}>*</span>}
+          </label>
+          <input
+            id="auth-username"
+            name="username"
+            value={form.username}
+            onChange={handleChange}
+            onBlur={handleUsernameBlur}
+            minLength={isLogin ? undefined : 2}
+            maxLength={isLogin ? undefined : 20}
+            required
+          />
+          {isLogin && loginUsernameError && (
+            <div className="error" style={{ color: "#ef4444" }}>
+              {loginUsernameError}
+            </div>
+          )}
+          {!isLogin && usernameError && (
+            <div className="error" style={{ color: "#ef4444" }}>
+              {usernameError}
+            </div>
+          )}
         </div>
 
         {!isLogin && (
+          <div style={{ display: "grid", gap: 6 }}>
+            <label
+              htmlFor="auth-email"
+              style={{ fontSize: 13, color: "#374151" }}
+            >
+              Email <span style={{ color: "#ef4444" }}>*</span>
+            </label>
+            <input
+              id="auth-email"
+              name="email"
+              value={form.email}
+              onChange={handleChange}
+              onBlur={handleEmailBlur}
+              required
+            />
+            {emailError && (
+              <div className="error" style={{ color: "#ef4444" }}>
+                {emailError}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Password with eye toggle */}
+        <div style={{ display: "grid", gap: 6 }}>
+          <label
+            htmlFor="auth-password"
+            style={{ fontSize: 13, color: "#374151" }}
+          >
+            Password {!isLogin && <span style={{ color: "#ef4444" }}>*</span>}
+          </label>
+
           <div
             style={{
               position: "relative",
@@ -596,11 +792,12 @@ export default function Auth({
             }}
           >
             <input
-              name="confirmPassword"
-              placeholder="Repeat Password"
+              id="auth-password"
+              name="password"
               type={showPassword ? "text" : "password"}
-              value={form.confirmPassword}
+              value={form.password}
               onChange={handleChange}
+              onBlur={handlePasswordBlur}
               required
               style={{ paddingRight: 44, width: "100%" }}
             />
@@ -626,11 +823,86 @@ export default function Auth({
               {showPassword ? "🙈" : "👁️"}
             </button>
           </div>
+
+          {isLogin && loginPasswordError && (
+            <div className="error" style={{ color: "#ef4444" }}>
+              {loginPasswordError}
+            </div>
+          )}
+
+          {!isLogin && passwordError && (
+            <div className="error" style={{ color: "#ef4444" }}>
+              {passwordError}
+            </div>
+          )}
+        </div>
+
+        {!isLogin && (
+          <div style={{ display: "grid", gap: 6 }}>
+            <label
+              htmlFor="auth-confirm-password"
+              style={{ fontSize: 13, color: "#374151" }}
+            >
+              Repeat password <span style={{ color: "#ef4444" }}>*</span>
+            </label>
+
+            <div
+              style={{
+                position: "relative",
+                display: "inline-block",
+                width: "100%",
+              }}
+            >
+              <input
+                id="auth-confirm-password"
+                name="confirmPassword"
+                type={showPassword ? "text" : "password"}
+                value={form.confirmPassword}
+                onChange={handleChange}
+                onBlur={handleConfirmPasswordBlur}
+                required
+                style={{ paddingRight: 44, width: "100%" }}
+              />
+
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                title={showPassword ? "Hide password" : "Show password"}
+                style={{
+                  position: "absolute",
+                  right: 8,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  border: "none",
+                  background: "transparent",
+                  cursor: "pointer",
+                  padding: 6,
+                  lineHeight: 1,
+                  fontSize: 16,
+                }}
+              >
+                {showPassword ? "🙈" : "👁️"}
+              </button>
+            </div>
+
+            {confirmPasswordError && (
+              <div className="error" style={{ color: "#ef4444" }}>
+                {confirmPasswordError}
+              </div>
+            )}
+          </div>
         )}
 
         {passwordMismatch && (
           <div className="error" style={{ color: "#ef4444" }}>
             Passwords do not match
+          </div>
+        )}
+
+        {error && (
+          <div className="error" style={{ color: "#ef4444" }}>
+            {error}
           </div>
         )}
 
@@ -650,12 +922,6 @@ export default function Auth({
         )}
 
         {info && <div style={{ color: "#16a34a" }}>{info}</div>}
-
-        {error && (
-          <div className="error" style={{ color: "#ef4444" }}>
-            {error}
-          </div>
-        )}
       </form>
 
       {fpOpen && (
@@ -686,21 +952,71 @@ export default function Auth({
               Reset password
             </div>
 
-            <input
-              placeholder="Username or Email"
-              value={fpIdentifier}
-              onChange={(e) => {
-                setFpIdentifier(e.target.value);
-                if (fpError) setFpError("");
-                if (fpInfo) setFpInfo("");
-              }}
-            />
+            <div style={{ display: "grid", gap: 6, marginBottom: 10 }}>
+              <label
+                htmlFor="fp-username"
+                style={{ fontSize: 13, color: "#374151" }}
+              >
+                Username <span style={{ color: "#ef4444" }}>*</span>
+              </label>
+              <input
+                id="fp-username"
+                value={fpUsername}
+                onBlur={handleFpUsernameBlur}
+                onChange={(e) => {
+                  setFpUsername(e.target.value);
+                  if (fpUsernameError) setFpUsernameError("");
+                  if (fpError) setFpError("");
+                  if (fpInfo) setFpInfo("");
+                }}
+              />
+
+              {fpUsernameError && (
+                <div className="error" style={{ color: "#ef4444" }}>
+                  {fpUsernameError}
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: "grid", gap: 6 }}>
+              <label
+                htmlFor="fp-email"
+                style={{ fontSize: 13, color: "#374151" }}
+              >
+                Email <span style={{ color: "#ef4444" }}>*</span>
+              </label>
+              <input
+                id="fp-email"
+                value={fpIdentifier}
+                onBlur={handleFpEmailBlur}
+                onChange={(e) => {
+                  setFpIdentifier(e.target.value);
+                  if (fpEmailError) setFpEmailError("");
+                  if (fpError) setFpError("");
+                  if (fpInfo) setFpInfo("");
+                }}
+              />
+
+              {fpEmailError && (
+                <div className="error" style={{ color: "#ef4444" }}>
+                  {fpEmailError}
+                </div>
+              )}
+            </div>
 
             <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
               <button
                 type="button"
                 onClick={requestForgotOtp}
-                disabled={fpSending || fpResending || fpResetting}
+                disabled={
+                  fpSending ||
+                  fpResending ||
+                  fpResetting ||
+                  !!fpUsernameError ||
+                  !String(fpUsername || "").trim() ||
+                  !!fpEmailError ||
+                  !String(fpIdentifier || "").trim()
+                }
               >
                 {fpSending ? "Sending..." : "Send code"}
               </button>
@@ -714,6 +1030,7 @@ export default function Auth({
                   fpResending ||
                   fpResetting ||
                   fpResendLeftSec > 0 ||
+                  !String(fpUsername || "").trim() ||
                   !String(fpIdentifier || "").trim()
                 }
               >

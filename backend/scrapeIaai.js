@@ -47,7 +47,7 @@ function getNextValueByLabel($, scope, labelText) {
     .filter(
       (_, el) =>
         $(el).text().replace(/\s+/g, " ").trim().toLowerCase() ===
-        labelText.toLowerCase()
+        labelText.toLowerCase(),
     )
     .first();
 
@@ -62,6 +62,17 @@ function extractMoney(text) {
     .replace(/\s+/g, " ")
     .trim();
   const m = s.match(/\$[\d,]+(?:\.\d{2})?/);
+  return m ? m[0] : null;
+}
+
+function extractOdometer(text) {
+  const s = String(text || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!s) return null;
+
+  // Common formats: "123,456 mi", "123456 miles", "Odometer: 12,345"
+  const m = s.match(/\b[\d,]{1,9}\b/);
   return m ? m[0] : null;
 }
 
@@ -108,6 +119,15 @@ function parseVehicleFromRow($, $row) {
 
   const price = priceFromAction || priceFromLabels || priceFromRowText;
 
+  const odometer =
+    extractOdometer(getNextValueByLabel($, $row, "Odometer:") || "") ||
+    extractOdometer(getNextValueByLabel($, $row, "Odometer") || "") ||
+    extractOdometer(getNextValueByLabel($, $row, "Mileage:") || "") ||
+    extractOdometer(getNextValueByLabel($, $row, "Mileage") || "") ||
+    extractOdometer(getNextValueByLabel($, $row, "ODO:") || "") ||
+    extractOdometer(getNextValueByLabel($, $row, "ODO") || "") ||
+    null;
+
   // Image
   const imgEl = $row.find("img[data-src], img[src]").first();
   const imgUrl = absUrl(imgEl.attr("data-src") || imgEl.attr("src"));
@@ -123,6 +143,7 @@ function parseVehicleFromRow($, $row) {
     vehicle_link,
     stock_id,
     price,
+    odometer,
     image,
   };
 }
@@ -183,6 +204,7 @@ function extractVehiclesFromHtml(html, limit = 500) {
               (vehicleId ? `${BASE_URL}/VehicleDetail/${vehicleId}~US` : null),
             stock_id,
             price: v.price,
+            odometer: v.odometer,
             image,
           };
         } catch {
@@ -271,11 +293,23 @@ function extractVehiclesFromHtml(html, limit = 500) {
           node.CurrentBid ??
           null;
 
+        const odometer =
+          node.odometer ??
+          node.Odometer ??
+          node.odometerReading ??
+          node.OdometerReading ??
+          node.mileage ??
+          node.Mileage ??
+          node.odo ??
+          node.ODO ??
+          null;
+
         if (name && typeof name === "string" && isValidVehicleId(name)) {
           vehicles.push({
             name,
             stock_id,
             price: price != null ? String(price) : null,
+            odometer: odometer != null ? String(odometer) : null,
           });
         }
 
@@ -297,6 +331,7 @@ function extractVehiclesFromHtml(html, limit = 500) {
         stock_id: v.stock_id,
         image: `<img src="https://vis.iaai.com/resizer?imageKeys=${v.name}~SID~I1&width=400&height=300" width="400" height="300" />`,
         price: v.price,
+        odometer: v.odometer,
       }));
   }
 
@@ -318,6 +353,7 @@ function extractVehiclesFromHtml(html, limit = 500) {
             stock_id: null,
             image: `<img src="https://vis.iaai.com/resizer?imageKeys=${inv}~SID~I1&width=400&height=300" width="400" height="300" />`,
             price: null,
+            odometer: null,
           };
         })
         .filter(Boolean)
@@ -331,11 +367,11 @@ function extractVehiclesFromHtml(html, limit = 500) {
 
   // Strategy D: Regex fallbacks
   const namesFromImages = uniq(
-    [...html.matchAll(/imageKeys=([A-Za-z0-9]+)~SID~I1/g)].map((m) => m[1])
+    [...html.matchAll(/imageKeys=([A-Za-z0-9]+)~SID~I1/g)].map((m) => m[1]),
   );
 
   const namesFromLinks = uniq(
-    [...html.matchAll(/\/VehicleDetail\/([A-Za-z0-9]+)~US/g)].map((m) => m[1])
+    [...html.matchAll(/\/VehicleDetail\/([A-Za-z0-9]+)~US/g)].map((m) => m[1]),
   );
 
   const names = uniq([...namesFromImages, ...namesFromLinks])
@@ -348,6 +384,7 @@ function extractVehiclesFromHtml(html, limit = 500) {
     stock_id: null,
     image: `<img src="https://vis.iaai.com/resizer?imageKeys=${name}~SID~I1&width=400&height=300" width="400" height="300" />`,
     price: null,
+    odometer: null,
   }));
 }
 

@@ -157,6 +157,12 @@ button:disabled {
   min-height: 14px;
 }
 
+.error {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
 .small {
   padding: 6px 8px;
   font-size: 14px;

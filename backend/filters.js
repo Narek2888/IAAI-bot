@@ -71,7 +71,7 @@ router.get("/", authRequired, (req, res) => {
         odo_from, odo_to
        FROM users
        WHERE id = $1`,
-      [req.user.id]
+      [req.user.id],
     );
     return res.json({ ok: true, filter: r.rows[0] || null });
   })().catch((e) => {
@@ -87,11 +87,11 @@ router.post("/", authRequired, (req, res) => {
   const inventoryTypesInput =
     f.inventory_types !== undefined
       ? f.inventory_types
-      : f.inventory_type ?? null;
+      : (f.inventory_type ?? null);
 
   // Prefer new multi-select field; accept legacy single value for older clients.
   const fuelTypesInput =
-    f.fuel_types !== undefined ? f.fuel_types : f.fuel_type ?? null;
+    f.fuel_types !== undefined ? f.fuel_types : (f.fuel_type ?? null);
 
   const normalizedInventoryTypes = normalizeInventoryTypes(inventoryTypesInput);
   const legacyInventoryType =
@@ -133,8 +133,20 @@ router.post("/", authRequired, (req, res) => {
         toNumberOrNull(f.odo_from),
         toNumberOrNull(f.odo_to),
         req.user.id,
-      ]
+      ],
     );
+
+    // Reset bot's per-user seen cache when filters change so next run starts fresh.
+    // This is intentionally NOT done during polling; it only happens on filter saves.
+    try {
+      const bot = require("./bot");
+      if (typeof bot?.resetLastSeenForUser === "function") {
+        await bot.resetLastSeenForUser(req.user.id);
+      }
+    } catch (e) {
+      // Non-fatal: filters were saved; cache reset failure should not block user.
+      console.error("Failed to reset bot last_seen after saving filters:", e);
+    }
 
     const saved = await db.query(
       `SELECT
@@ -144,7 +156,7 @@ router.post("/", authRequired, (req, res) => {
         odo_from, odo_to
        FROM users
        WHERE id = $1`,
-      [req.user.id]
+      [req.user.id],
     );
 
     return res.json({ ok: true, filter: saved.rows[0] || null });

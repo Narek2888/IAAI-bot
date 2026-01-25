@@ -1,6 +1,12 @@
 import React from "react";
 import "@testing-library/jest-dom";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import Auth from "./Auth";
 
 describe("Auth Component", () => {
@@ -21,15 +27,15 @@ describe("Auth Component", () => {
             user: { id: 1, username: "testuser" },
             token: "test-token",
           }),
-      })
+      }),
     );
 
     render(<Auth onAuth={mockOnAuth} />);
 
-    fireEvent.change(screen.getByPlaceholderText("Username"), {
+    fireEvent.change(screen.getByLabelText(/username/i), {
       target: { value: "TestUser" },
     });
-    fireEvent.change(screen.getByPlaceholderText("Password"), {
+    fireEvent.change(screen.getByLabelText(/^password\b/i), {
       target: { value: "password123" },
     });
 
@@ -59,15 +65,15 @@ describe("Auth Component", () => {
           Promise.resolve({
             msg: "Invalid credentials",
           }),
-      })
+      }),
     );
 
     render(<Auth onAuth={mockOnAuth} />);
 
-    fireEvent.change(screen.getByPlaceholderText("Username"), {
+    fireEvent.change(screen.getByLabelText(/username/i), {
       target: { value: "wronguser" },
     });
-    fireEvent.change(screen.getByPlaceholderText("Password"), {
+    fireEvent.change(screen.getByLabelText(/^password\b/i), {
       target: { value: "wrongpassword" },
     });
 
@@ -92,23 +98,23 @@ describe("Auth Component", () => {
             user: { id: 1, username: "testuser" },
             token: "test-token",
           }),
-      })
+      }),
     );
 
     render(<Auth onAuth={mockOnAuth} />);
 
     fireEvent.click(screen.getByText("Register"));
 
-    fireEvent.change(screen.getByPlaceholderText("Username"), {
+    fireEvent.change(screen.getByLabelText(/username/i), {
       target: { value: "TestUser" },
     });
-    fireEvent.change(screen.getByPlaceholderText("Email"), {
+    fireEvent.change(screen.getByLabelText(/email/i), {
       target: { value: "test@example.com" },
     });
-    fireEvent.change(screen.getByPlaceholderText("Password"), {
+    fireEvent.change(screen.getByLabelText(/^password\b/i), {
       target: { value: "password123" },
     });
-    fireEvent.change(screen.getByPlaceholderText("Repeat Password"), {
+    fireEvent.change(screen.getByLabelText(/repeat password/i), {
       target: { value: "different" },
     });
 
@@ -116,7 +122,7 @@ describe("Auth Component", () => {
 
     await waitFor(() => {
       expect(
-        screen.getAllByText("Passwords do not match").length
+        screen.getAllByText("Passwords do not match").length,
       ).toBeGreaterThan(0);
     });
 
@@ -153,16 +159,16 @@ describe("Auth Component", () => {
 
     fireEvent.click(screen.getByText("Register"));
 
-    fireEvent.change(screen.getByPlaceholderText("Username"), {
+    fireEvent.change(screen.getByLabelText(/username/i), {
       target: { value: "TestUser" },
     });
-    fireEvent.change(screen.getByPlaceholderText("Email"), {
+    fireEvent.change(screen.getByLabelText(/email/i), {
       target: { value: "test@example.com" },
     });
-    fireEvent.change(screen.getByPlaceholderText("Password"), {
+    fireEvent.change(screen.getByLabelText(/^password\b/i), {
       target: { value: "password123" },
     });
-    fireEvent.change(screen.getByPlaceholderText("Repeat Password"), {
+    fireEvent.change(screen.getByLabelText(/repeat password/i), {
       target: { value: "password123" },
     });
 
@@ -244,11 +250,17 @@ describe("Auth Component", () => {
       expect(screen.getByText("Reset password")).toBeInTheDocument();
     });
 
-    fireEvent.change(screen.getByPlaceholderText("Username or Email"), {
+    const dialog = screen.getByRole("dialog");
+    const modal = within(dialog);
+
+    fireEvent.change(modal.getByLabelText(/^username\b/i), {
       target: { value: "testuser" },
     });
+    fireEvent.change(modal.getByLabelText(/^email\b/i), {
+      target: { value: "test@example.com" },
+    });
 
-    fireEvent.click(screen.getByText("Send code"));
+    fireEvent.click(modal.getByText("Send code"));
 
     await waitFor(() => {
       expect(screen.getByPlaceholderText("OTP")).toBeInTheDocument();
@@ -257,7 +269,8 @@ describe("Auth Component", () => {
     // Verify request payload
     const [reqUrl, reqOptions] = global.fetch.mock.calls[0];
     expect(reqUrl).toContain("/api/auth/forgot-password/request-otp");
-    expect(reqOptions?.body).toContain('"usernameOrEmail":"testuser"');
+    expect(reqOptions?.body).toContain('"username":"testuser"');
+    expect(reqOptions?.body).toContain('"email":"test@example.com"');
 
     // OK stays disabled until OTP + matching passwords
     const okBtn = screen.getByText("OK");
@@ -282,7 +295,7 @@ describe("Auth Component", () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText("Password reset successful. Please sign in.")
+        screen.getByText("Password reset successful. Please sign in."),
       ).toBeInTheDocument();
     });
 

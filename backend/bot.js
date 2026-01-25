@@ -38,7 +38,7 @@ async function setBotContinuous(userId, enabled) {
 async function getBotContinuous(userId) {
   const r = await db.query(
     "SELECT bot_continuous FROM users WHERE id = $1 LIMIT 1",
-    [userId]
+    [userId],
   );
   const row = r.rows[0];
   return row ? !!row.bot_continuous : false;
@@ -78,6 +78,7 @@ function getState(userId) {
 
       lastSeen: {},
       lastSeenLoaded: false,
+      pendingLastSeenReset: false,
       lastCount: 0,
 
       // NEW: status response coalescing
@@ -93,11 +94,30 @@ function getState(userId) {
   return states.get(userId);
 }
 
+async function resetLastSeenForUser(userId) {
+  const st = getState(userId);
+
+  // Don't reset in the middle of an active poll; defer to the next run.
+  if (st.inFlight) {
+    st.pendingLastSeenReset = true;
+    st.lastStatusJson = null;
+    return { ok: true, deferred: true };
+  }
+
+  st.pendingLastSeenReset = false;
+  st.lastSeen = {};
+  st.lastSeenLoaded = true;
+  st.lastStatusJson = null;
+
+  await saveLastSeen(userId, {});
+  return { ok: true, deferred: false };
+}
+
 async function loadLastSeen(userId) {
   try {
     const r = await db.query(
       "SELECT last_seen FROM bot_states WHERE user_id = $1 LIMIT 1",
-      [userId]
+      [userId],
     );
     return r.rows[0]?.last_seen && typeof r.rows[0].last_seen === "object"
       ? r.rows[0].last_seen
@@ -115,7 +135,7 @@ async function saveLastSeen(userId, lastSeen) {
        VALUES ($1, $2, NOW())
        ON CONFLICT (user_id)
        DO UPDATE SET last_seen = EXCLUDED.last_seen, updated_at = NOW()`,
-      [userId, lastSeen || {}]
+      [userId, lastSeen || {}],
     );
   } catch {
     // ignore
@@ -191,6 +211,65 @@ function toNumberOrNull(v) {
   return Number.isFinite(n) ? n : null;
 }
 
+function parsePriceToNumber(price) {
+  if (price === null || price === undefined) return null;
+  const s = String(price).trim();
+  if (!s) return null;
+
+  // Prefer a $-prefixed token if present, but fall back to any digits.
+  const m = s.match(/\$[\d,]+(?:\.\d+)?/);
+  const token = m ? m[0] : s;
+  const digits = token.replace(/[^0-9.]/g, "");
+  if (!digits) return null;
+  const n = Number(digits);
+  return Number.isFinite(n) ? n : null;
+}
+
+function parseOdometerToNumber(odometer) {
+  if (odometer === null || odometer === undefined) return null;
+  const s = String(odometer).trim();
+  if (!s) return null;
+
+  // Common formats: "123,456", "123,456 mi", "123456 miles", "N/A"
+  const m = s.match(/\b[\d,]{1,9}\b/);
+  if (!m) return null;
+  const digits = m[0].replace(/[^0-9]/g, "");
+  if (!digits) return null;
+  const n = Number(digits);
+  return Number.isFinite(n) ? n : null;
+}
+
+function filterVehiclesByBidRange(vehicles, u) {
+  const min = toNumberOrNull(u?.min_bid);
+  const max = toNumberOrNull(u?.max_bid);
+
+  if (min === null && max === null) return vehicles || [];
+
+  return (vehicles || []).filter((v) => {
+    const p = parsePriceToNumber(v?.price);
+    if (p === null) return false;
+    if (min !== null && p < min) return false;
+    if (max !== null && p > max) return false;
+    return true;
+  });
+}
+
+function filterVehiclesByOdoRange(vehicles, u) {
+  const from = toNumberOrNull(u?.odo_from);
+  const to = toNumberOrNull(u?.odo_to);
+
+  if (from === null && to === null) return vehicles || [];
+
+  return (vehicles || []).filter((v) => {
+    const raw = v?.odometer ?? v?.odo ?? v?.mileage ?? null;
+    const miles = parseOdometerToNumber(raw);
+    if (miles === null) return false;
+    if (from !== null && miles < from) return false;
+    if (to !== null && miles > to) return false;
+    return true;
+  });
+}
+
 function extractImgSrc(imageValue) {
   if (!imageValue) return null;
   const s = String(imageValue);
@@ -210,7 +289,7 @@ function pushLongRange(
   name,
   from,
   to,
-  { defaultFrom = null, defaultTo = null } = {}
+  { defaultFrom = null, defaultTo = null } = {},
 ) {
   const fromN = toNumberOrNull(from);
   const toN = toNumberOrNull(to);
@@ -277,43 +356,40 @@ function buildIaaiPayloadFromUserFilters(u) {
     Array.isArray(u.inventory_types) && u.inventory_types.length
       ? u.inventory_types
       : u.inventory_type
-      ? [u.inventory_type]
-      : [];
+        ? [u.inventory_type]
+        : [];
   const fuelTypes =
     Array.isArray(u.fuel_types) && u.fuel_types.length
       ? u.fuel_types
       : u.fuel_type
-      ? [u.fuel_type]
-      : [];
+        ? [u.fuel_type]
+        : [];
 
   // Keep payload stable and website-like ordering
   const fuelTypesOrdered = ["Electric", "Other"].filter((v) =>
-    fuelTypes.includes(v)
+    fuelTypes.includes(v),
   );
   const inventoryTypesOrdered = ["Automobiles", "Motorcycles"].filter((v) =>
-    inventoryTypes.includes(v)
+    inventoryTypes.includes(v),
   );
 
-  // Match real IAAI payload ordering (as observed on the website).
-  // 1) AuctionType
-  pushFacet(Searches, "AuctionType", "Buy Now");
+  // Match real IAAI payload ordering.
+  // IMPORTANT: Only emit filters the user actually set.
+  // (Default ranges like ODO 0..150k can unintentionally narrow results.)
 
-  // 2) Year
-  pushLongRange(Searches, "Year", u.year_from, u.year_to, {
-    defaultFrom: 1900,
-    defaultTo: 2027,
-  });
+  // 1) AuctionType (optional)
+  pushFacet(Searches, "AuctionType", u.auction_type);
+
+  // 2) Year (optional)
+  pushLongRange(Searches, "Year", u.year_from, u.year_to);
 
   // 3) InventoryTypes (one Searches entry per selected value)
   for (const it of inventoryTypesOrdered) {
     pushFacet(Searches, "InventoryTypes", it);
   }
 
-  // 4) ODO range
-  pushLongRange(Searches, "ODOValue", u.odo_from, u.odo_to, {
-    defaultFrom: 0,
-    defaultTo: 150000,
-  });
+  // 4) ODO range (optional)
+  pushLongRange(Searches, "ODOValue", u.odo_from, u.odo_to);
 
   // 5) Full text search (optional)
   pushFullSearch(Searches, u.full_search);
@@ -323,11 +399,8 @@ function buildIaaiPayloadFromUserFilters(u) {
     pushFacet(Searches, "FuelTypeDesc", ft);
   }
 
-  // 7) MinimumBidAmount
-  pushLongRange(Searches, "MinimumBidAmount", u.min_bid, u.max_bid, {
-    defaultFrom: 0,
-    defaultTo: 150000,
-  });
+  // 7) MinimumBidAmount (optional)
+  pushLongRange(Searches, "MinimumBidAmount", u.min_bid, u.max_bid);
 
   return {
     Searches,
@@ -359,7 +432,7 @@ async function fetchUserFilters(userId) {
       odo_from, odo_to
      FROM users
      WHERE id = $1`,
-    [userId]
+    [userId],
   );
   return r.rows[0] || null;
 }
@@ -377,7 +450,7 @@ async function fetchUserBotSettings(userId) {
       odo_from, odo_to
      FROM users
      WHERE id = $1`,
-    [userId]
+    [userId],
   );
   return r.rows[0] || null;
 }
@@ -437,14 +510,14 @@ function summarizeIaaiResponse(resp) {
   if (typeof data === "string") {
     const snippet = data.slice(0, 600);
     return `IAAI response: HTTP ${status} (${contentType}), text[0..600]=${JSON.stringify(
-      snippet
+      snippet,
     )}`;
   }
 
   if (data && typeof data === "object") {
     const keys = Object.keys(data).slice(0, 30);
     return `IAAI response: HTTP ${status} (${contentType}), json keys=${keys.join(
-      ", "
+      ", ",
     )}`;
   }
 
@@ -470,8 +543,8 @@ function extractIaaiData(resp, maxChars = 8000) {
     typeof data === "string"
       ? data
       : data === undefined
-      ? ""
-      : JSON.stringify(data);
+        ? ""
+        : JSON.stringify(data);
 
   return { status, contentType, text: text.slice(0, maxChars) };
 }
@@ -481,6 +554,13 @@ async function runOnceForUser(userId) {
 
   let changesCount = 0;
   let emailed = false;
+
+  if (st.pendingLastSeenReset) {
+    st.pendingLastSeenReset = false;
+    st.lastSeen = {};
+    st.lastSeenLoaded = true;
+    await saveLastSeen(userId, {});
+  }
 
   if (!st.lastSeenLoaded) {
     st.lastSeen = await loadLastSeen(userId);
@@ -535,24 +615,37 @@ async function runOnceForUser(userId) {
       st.lastSeen = nextSeen;
       await saveLastSeen(userId, nextSeen);
 
-      changesCount = changes.length;
+      const filteredByBid = filterVehiclesByBidRange(changes, u || {});
+      const filteredChanges = filterVehiclesByOdoRange(filteredByBid, u || {});
 
-      if (changes.length > 0) {
+      const droppedByBidRange = changes.length - filteredByBid.length;
+      const droppedByOdoRange = filteredByBid.length - filteredChanges.length;
+
+      changesCount = filteredChanges.length;
+
+      if (droppedByBidRange > 0) {
+        st.lastOutput += ` | dropped ${droppedByBidRange} out-of-bid-range update(s)`;
+      }
+      if (droppedByOdoRange > 0) {
+        st.lastOutput += ` | dropped ${droppedByOdoRange} out-of-odo-range update(s)`;
+      }
+
+      if (filteredChanges.length > 0) {
         const userRes = await db.query(
           "SELECT email, username FROM users WHERE id = $1",
-          [userId]
+          [userId],
         );
         const user = userRes.rows[0];
 
         if (user?.email) {
           try {
             if (String(process.env.DEBUG_EMAIL_VEHICLES || "") === "1") {
-              const sample = changes[0] || null;
+              const sample = filteredChanges[0] || null;
               if (sample) {
                 console.log("[email-debug] sample vehicle", {
                   userId,
                   email: user.email,
-                  changes: changes.length,
+                  changes: filteredChanges.length,
                   title: sample.title ?? null,
                   vehicle_link: sample.vehicle_link ?? null,
                   stock_id: sample.stock_id ?? null,
@@ -570,11 +663,11 @@ async function runOnceForUser(userId) {
 
             await sendVehiclesEmail({
               to: user.email,
-              subject: `IAAI updates for ${user.username} (${changes.length})`,
-              vehicles: changes,
+              subject: `IAAI updates for ${user.username} (${filteredChanges.length})`,
+              vehicles: filteredChanges,
             });
             emailed = true;
-            st.lastOutput += ` | emailed ${changes.length} update(s)`;
+            st.lastOutput += ` | emailed ${filteredChanges.length} update(s)`;
           } catch (e) {
             console.error("SendGrid error:", e?.response?.body || e);
             st.lastOutput += ` | email failed: ${
@@ -769,7 +862,7 @@ router.resumeContinuousBots = async function resumeContinuousBots() {
   const pollMs = Number(process.env.BOT_POLL_MS || 10 * 60 * 1000);
 
   const r = await db.query(
-    "SELECT id FROM users WHERE bot_continuous = true ORDER BY id"
+    "SELECT id FROM users WHERE bot_continuous = true ORDER BY id",
   );
 
   const userIds = r.rows.map((row) => row.id);
@@ -791,6 +884,10 @@ router.resumeContinuousBots = async function resumeContinuousBots() {
 
   return { resumed, pollMs };
 };
+
+// Allow other routes (e.g. filters save) to clear the per-user seen cache.
+// This is NOT done during normal polling; it only happens when explicitly called.
+router.resetLastSeenForUser = resetLastSeenForUser;
 
 function isMeaningful(v) {
   if (v == null) return false;

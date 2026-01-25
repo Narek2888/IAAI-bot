@@ -85,6 +85,7 @@ export default function App() {
   });
 
   const [emailForm, setEmailForm] = useState({ newEmail: "" });
+  const [emailFormError, setEmailFormError] = useState("");
   const [emailOtpOpen, setEmailOtpOpen] = useState(false);
   const [emailOtpCode, setEmailOtpCode] = useState("");
   const [emailOtpNonce, setEmailOtpNonce] = useState(null);
@@ -348,6 +349,12 @@ export default function App() {
       .trim()
       .toLowerCase();
 
+  const isValidEmailFormat = (email) => {
+    const s = String(email || "").trim();
+    if (!s) return false;
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
+  };
+
   const formatTimer = (totalSeconds) => {
     const s = Math.max(0, Number(totalSeconds) || 0);
     const mm = String(Math.floor(s / 60)).padStart(2, "0");
@@ -382,6 +389,10 @@ export default function App() {
     const newEmail = normalizeEmail(emailForm.newEmail);
     if (!newEmail) {
       alert("Enter a new email");
+      return;
+    }
+    if (!isValidEmailFormat(newEmail)) {
+      setEmailFormError("Invalid format");
       return;
     }
     if (normalizeEmail(user?.email) === newEmail) {
@@ -422,6 +433,11 @@ export default function App() {
     const newEmail = normalizeEmail(emailForm.newEmail);
     if (!newEmail) {
       setEmailOtpError("Missing email");
+      return;
+    }
+    if (!isValidEmailFormat(newEmail)) {
+      setEmailFormError("Invalid format");
+      setEmailOtpError("Invalid format");
       return;
     }
 
@@ -467,6 +483,11 @@ export default function App() {
     const newEmail = normalizeEmail(emailForm.newEmail);
     if (!newEmail) {
       setEmailOtpError("Missing email");
+      return;
+    }
+    if (!isValidEmailFormat(newEmail)) {
+      setEmailFormError("Invalid format");
+      setEmailOtpError("Invalid format");
       return;
     }
 
@@ -515,22 +536,39 @@ export default function App() {
         Current: {user?.email ?? ""}
       </div>
 
-      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <input
-          placeholder="New email"
-          value={emailForm.newEmail}
-          onChange={(e) => {
-            const v = e.target.value;
-            setEmailForm({ newEmail: v });
-          }}
-        />
-        <button
-          type="button"
-          onClick={requestEmailOtp}
-          disabled={emailOtpSending}
-        >
-          {emailOtpSending ? "Sending..." : "Send code"}
-        </button>
+      <div style={{ display: "grid", gap: 6 }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <input
+            placeholder="New email"
+            value={emailForm.newEmail}
+            onChange={(e) => {
+              const v = e.target.value;
+              setEmailForm({ newEmail: v });
+              if (emailFormError) setEmailFormError("");
+            }}
+            onBlur={() => {
+              const v = String(emailForm.newEmail || "").trim();
+              if (!v) {
+                setEmailFormError("");
+                return;
+              }
+              setEmailFormError(isValidEmailFormat(v) ? "" : "Invalid format");
+            }}
+          />
+          <button
+            type="button"
+            onClick={requestEmailOtp}
+            disabled={emailOtpSending}
+          >
+            {emailOtpSending ? "Sending..." : "Send code"}
+          </button>
+        </div>
+
+        {emailFormError && (
+          <div className="error" style={{ color: "#ef4444" }}>
+            {emailFormError}
+          </div>
+        )}
       </div>
     </div>
   );
