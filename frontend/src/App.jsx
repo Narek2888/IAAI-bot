@@ -855,7 +855,7 @@ export default function App() {
           )}
         </div>
         {renderUpdateModal()}
-        <VersionRow version={serverVersion || APP_VERSION} />
+        <VersionRow version={APP_VERSION} />
       </>
     );
 
@@ -1504,7 +1504,7 @@ export default function App() {
         <Bot disabled={hasTypeErrors} />
       </div>
       {renderUpdateModal()}
-      <VersionRow version={serverVersion || APP_VERSION} />
+      <VersionRow version={APP_VERSION} />
     </>
   );
 }
