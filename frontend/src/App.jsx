@@ -180,25 +180,11 @@ export default function App() {
       }
     };
 
-    const onVisibility = () => {
-      if (document.visibilityState === "visible") check();
-    };
-
-    const onFocus = () => {
-      if (document.visibilityState === "visible") check();
-    };
-
     // Initial check on load
     check();
 
-    // Check when user returns to the tab/window
-    document.addEventListener("visibilitychange", onVisibility);
-    window.addEventListener("focus", onFocus);
-
     return () => {
       cancelled = true;
-      document.removeEventListener("visibilitychange", onVisibility);
-      window.removeEventListener("focus", onFocus);
     };
   }, []);
 
