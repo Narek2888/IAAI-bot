@@ -44,6 +44,22 @@ async function getBotContinuous(userId) {
   return row ? !!row.bot_continuous : false;
 }
 
+async function ensureUnsubscribeToken(userId) {
+  const r = await db.query(
+    "SELECT unsubscribe_token FROM users WHERE id = $1 LIMIT 1",
+    [userId],
+  );
+  const existing = String(r.rows[0]?.unsubscribe_token || "").trim();
+  if (existing) return existing;
+
+  const token = crypto.randomBytes(32).toString("hex");
+  await db.query(
+    "UPDATE users SET unsubscribe_token = $1 WHERE id = $2 AND (unsubscribe_token IS NULL OR unsubscribe_token = '')",
+    [token, userId],
+  );
+  return token;
+}
+
 function hasAnyFiltersSet(u) {
   if (!u) return false;
   return [
@@ -632,12 +648,12 @@ async function runOnceForUser(userId) {
 
       if (filteredChanges.length > 0) {
         const userRes = await db.query(
-          "SELECT email, username FROM users WHERE id = $1",
+          "SELECT email, username, email_unsubscribed, unsubscribe_token FROM users WHERE id = $1",
           [userId],
         );
         const user = userRes.rows[0];
 
-        if (user?.email) {
+        if (user?.email && !user?.email_unsubscribed) {
           try {
             if (String(process.env.DEBUG_EMAIL_VEHICLES || "") === "1") {
               const sample = filteredChanges[0] || null;
@@ -661,10 +677,24 @@ async function runOnceForUser(userId) {
               }
             }
 
+            const token = await ensureUnsubscribeToken(userId);
+            const appBase = String(
+              process.env.APP_BASE_URL ||
+                process.env.PUBLIC_BASE_URL ||
+                process.env.PUBLIC_URL ||
+                `http://127.0.0.1:${process.env.PORT || 5174}`,
+            )
+              .trim()
+              .replace(/\/$/, "");
+            const unsubscribeUrl = `${appBase}/unsubscribe?token=${encodeURIComponent(
+              token,
+            )}`;
+
             await sendVehiclesEmail({
               to: user.email,
               subject: `IAAI updates for ${user.username} (${filteredChanges.length})`,
               vehicles: filteredChanges,
+              unsubscribeUrl,
             });
             emailed = true;
             st.lastOutput += ` | emailed ${filteredChanges.length} update(s)`;
@@ -674,6 +704,8 @@ async function runOnceForUser(userId) {
               e?.message || "unknown error"
             }`;
           }
+        } else if (user?.email && user?.email_unsubscribed) {
+          st.lastOutput += " | user unsubscribed from emails";
         } else {
           st.lastOutput += " | user has no email set";
         }

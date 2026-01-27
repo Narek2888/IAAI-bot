@@ -55,6 +55,9 @@ app.get("/api/version", (req, res) => {
   return res.json({ ok: true, version: SERVER_VERSION_7 });
 });
 
+// Public unsubscribe endpoint (used from email links)
+app.use(require("./unsubscribe"));
+
 app.use("/api/auth", require("./auth"));
 app.use("/api/filters", require("./filters"));
 const botRouter = require("./bot");
@@ -91,7 +94,7 @@ async function start() {
         console.log(
           `Resumed continuous bots: ${r?.resumed ?? 0} (pollMs=${
             r?.pollMs ?? "?"
-          })`
+          })`,
         );
       } catch (e) {
         console.error("Failed to resume continuous bots:", e);

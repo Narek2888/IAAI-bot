@@ -2,6 +2,20 @@ const sgMail = require("@sendgrid/mail");
 
 const BASE_URL = process.env.IAAI_BASE_URL || "https://www.iaai.com";
 
+function getAppBaseUrl() {
+  const candidates = [
+    process.env.APP_BASE_URL,
+    process.env.PUBLIC_BASE_URL,
+    process.env.PUBLIC_URL,
+  ].filter(Boolean);
+
+  const raw = String(candidates[0] || "").trim();
+  if (raw) return raw.replace(/\/$/, "");
+
+  const port = process.env.PORT || 5174;
+  return `http://127.0.0.1:${port}`;
+}
+
 function requireEnv(name) {
   const v = process.env[name];
   if (!v) throw new Error(`Missing env var: ${name}`);
@@ -115,7 +129,7 @@ function buildImageHtml(imageValue) {
     if (!/style\s*=/.test(html)) {
       html = html.replace(
         /<img/i,
-        '<img style="max-width:400px;height:auto;display:block;"'
+        '<img style="max-width:400px;height:auto;display:block;"',
       );
     }
 
@@ -127,7 +141,7 @@ function buildImageHtml(imageValue) {
   if (!absUrl) return "";
 
   return `<img src="${esc(
-    absUrl
+    absUrl,
   )}" style="max-width:400px;height:auto;display:block;" width="400" />`;
 }
 
@@ -151,7 +165,7 @@ function vehiclesToHtml(vehicles) {
             ${
               href
                 ? `<a href="${esc(
-                    href
+                    href,
                   )}" target="_blank" rel="noopener noreferrer">${label}</a>`
                 : "N/A"
             }
@@ -175,17 +189,50 @@ function vehiclesToHtml(vehicles) {
   `;
 }
 
-async function sendVehiclesEmail({ to, subject, vehicles }) {
+function unsubscribeFooterHtml(unsubscribeUrl) {
+  const appBase = getAppBaseUrl();
+  const href = String(unsubscribeUrl || "").trim();
+  if (!href) return "";
+
+  const safeHref = esc(href);
+  const safeAppBase = esc(appBase);
+
+  return `
+    <hr style="border:none;border-top:1px solid #e5e7eb;margin:18px 0;" />
+    <div style="color:#6b7280;font-size:12px;line-height:1.4;font-family: Arial, sans-serif;">
+      <div style="margin:0 0 6px 0;">You are receiving this email because you enabled IAAI update notifications.</div>
+      <div style="margin:0 0 6px 0;">To stop receiving these update emails, <a href="${safeHref}" target="_blank" rel="noopener noreferrer">unsubscribe</a>.</div>
+      <div style="margin:0;">If the link doesn't work, copy/paste this URL into your browser: ${safeHref}</div>
+      <div style="margin:8px 0 0 0;">Service URL: ${safeAppBase}</div>
+    </div>
+  `;
+}
+
+async function sendVehiclesEmail({ to, subject, vehicles, unsubscribeUrl }) {
   const apiKey = requireEnv("SENDGRID_API_KEY");
   const from = requireEnv("SENDGRID_FROM");
 
   sgMail.setApiKey(apiKey);
 
+  const htmlBody = `${vehiclesToHtml(vehicles)}${unsubscribeFooterHtml(
+    unsubscribeUrl,
+  )}`;
+
+  const listUnsub = String(unsubscribeUrl || "").trim();
+  const headers = listUnsub
+    ? {
+        // Many clients show an Unsubscribe UI when this header is present
+        "List-Unsubscribe": `<${listUnsub}>`,
+        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+      }
+    : undefined;
+
   await sgMail.send({
     to,
     from,
     subject,
-    html: vehiclesToHtml(vehicles),
+    html: htmlBody,
+    headers,
   });
 }
 
@@ -199,7 +246,7 @@ async function sendOtpEmail({ to, otp }) {
   if (!apiKey || !from) {
     console.warn(
       "[mailer] SENDGRID_API_KEY/SENDGRID_FROM not set; OTP email not sent. OTP:",
-      otp
+      otp,
     );
     return;
   }
