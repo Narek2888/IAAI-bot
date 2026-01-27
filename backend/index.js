@@ -8,9 +8,45 @@ const { execSync } = require("child_process");
 const { migrate } = require("./migrate");
 
 const app = express();
+app.set("trust proxy", true);
 // Vite dev server proxies /api -> http://127.0.0.1:5174 by default.
 // Avoid defaulting to 5432 (Postgres default port).
 const PORT = process.env.PORT || 5174;
+
+// Redirect old Railway domain -> new app domain (browser navigation).
+// Keeps /api working in case any clients still call it.
+const REDIRECT_FROM_HOST = String(
+  process.env.REDIRECT_FROM_HOST ||
+    "beneficial-warmth-production.up.railway.app",
+)
+  .trim()
+  .toLowerCase();
+const REDIRECT_TO_BASE = String(
+  process.env.REDIRECT_TO_BASE || "https://app.auctionbot.ink",
+)
+  .trim()
+  .replace(/\/$/, "");
+
+app.use((req, res, next) => {
+  const method = String(req.method || "").toUpperCase();
+  if (method !== "GET" && method !== "HEAD") return next();
+
+  // Do not redirect API routes.
+  if (String(req.path || "").startsWith("/api")) return next();
+
+  // Prefer forwarded host when behind Railway / proxies.
+  const hostHeader = String(
+    req.get("x-forwarded-host") || req.get("host") || "",
+  )
+    .trim()
+    .toLowerCase();
+  const host = hostHeader.split(",")[0].trim().split(":")[0].trim();
+
+  if (!host || host !== REDIRECT_FROM_HOST) return next();
+
+  const target = `${REDIRECT_TO_BASE}${req.originalUrl || "/"}`;
+  return res.redirect(301, target);
+});
 
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: "1mb" }));
