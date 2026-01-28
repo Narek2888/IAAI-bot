@@ -149,13 +149,13 @@ export default function App() {
       }
     };
 
-    const check = async () => {
+    const check = async (force = false) => {
       if (cancelled) return;
       if (document.visibilityState !== "visible") return;
 
       const now = Date.now();
       if (inFlight) return;
-      if (now - lastCheckAt < MIN_GAP_MS) return;
+      if (!force && now - lastCheckAt < MIN_GAP_MS) return;
       lastCheckAt = now;
       inFlight = true;
 
@@ -196,15 +196,26 @@ export default function App() {
 
     // Also re-check when the tab becomes visible again.
     const onVisibility = () => {
-      if (document.visibilityState === "visible") check();
+      if (document.visibilityState === "visible") check(true);
     };
     document.addEventListener("visibilitychange", onVisibility);
+
+    // Some browsers don't fire visibilitychange when switching windows.
+    // Ensure we re-check when the window/tab gains focus.
+    const onFocus = () => check(true);
+    window.addEventListener("focus", onFocus);
+
+    // BFCache restore / returning to tab can trigger pageshow.
+    const onPageShow = () => check(true);
+    window.addEventListener("pageshow", onPageShow);
 
     return () => {
       cancelled = true;
       if (timer) clearTimeout(timer);
       timer = null;
       document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("pageshow", onPageShow);
     };
   }, []);
 
