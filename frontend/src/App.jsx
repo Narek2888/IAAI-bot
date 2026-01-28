@@ -138,6 +138,8 @@ export default function App() {
     let inFlight = false;
     let lastCheckAt = 0;
     const MIN_GAP_MS = 1500;
+    const POLL_MS = 5 * 60 * 1000;
+    let timer = null;
 
     const readDismissed = () => {
       try {
@@ -183,8 +185,26 @@ export default function App() {
     // Initial check on load
     check();
 
+    // Keep checking periodically so an already-open tab notices new deploys.
+    const loop = async () => {
+      if (cancelled) return;
+      await check();
+      if (cancelled) return;
+      timer = setTimeout(loop, POLL_MS);
+    };
+    timer = setTimeout(loop, POLL_MS);
+
+    // Also re-check when the tab becomes visible again.
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") check();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+
     return () => {
       cancelled = true;
+      if (timer) clearTimeout(timer);
+      timer = null;
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, []);
 
