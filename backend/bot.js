@@ -7,7 +7,7 @@ const crypto = require("crypto"); // ADD
 const db = require("./db");
 const { authRequired } = require("./authMiddleware");
 const { extractVehiclesFromHtml } = require("./scrapeIaai");
-const { sendVehiclesEmail } = require("./mailer");
+const { sendVehiclesEmail, sendTestEmail } = require("./mailer");
 
 const router = express.Router();
 
@@ -263,7 +263,9 @@ function filterVehiclesByBidRange(vehicles, u) {
 
   return (vehicles || []).filter((v) => {
     const p = parsePriceToNumber(v?.price);
-    if (p === null) return false;
+    // If price is missing/unparseable in the scraped HTML, don't drop the item.
+    // The IAAI Search payload already applies server-side filtering.
+    if (p === null) return true;
     if (min !== null && p < min) return false;
     if (max !== null && p > max) return false;
     return true;
@@ -279,7 +281,9 @@ function filterVehiclesByOdoRange(vehicles, u) {
   return (vehicles || []).filter((v) => {
     const raw = v?.odometer ?? v?.odo ?? v?.mileage ?? null;
     const miles = parseOdometerToNumber(raw);
-    if (miles === null) return false;
+    // If odometer is missing/unparseable in the scraped HTML, don't drop the item.
+    // The IAAI Search payload already applies server-side filtering.
+    if (miles === null) return true;
     if (from !== null && miles < from) return false;
     if (to !== null && miles > to) return false;
     return true;
@@ -565,6 +569,74 @@ function extractIaaiData(resp, maxChars = 8000) {
   return { status, contentType, text: text.slice(0, maxChars) };
 }
 
+function vehicleUniqKey(v) {
+  if (!v) return null;
+  const link = v?.vehicle_link ? String(v.vehicle_link).trim() : "";
+  if (link) return link;
+  const stock = v?.stock_id ? String(v.stock_id).trim() : "";
+  if (stock) return `stock:${stock}`;
+  return null;
+}
+
+async function fetchVehiclesPaged({
+  firstHtml,
+  basePayload,
+  maxPages,
+  maxVehicles,
+}) {
+  const uniq = new Map();
+  const addMany = (arr) => {
+    let added = 0;
+    for (const v of arr || []) {
+      const k = vehicleUniqKey(v);
+      if (!k) continue;
+      if (uniq.has(k)) continue;
+      uniq.set(k, v);
+      added += 1;
+      if (uniq.size >= maxVehicles) break;
+    }
+    return added;
+  };
+
+  // Page 1: use the already-fetched HTML
+  const p1 = extractVehiclesFromHtml(firstHtml, maxVehicles);
+  addMany(p1);
+
+  let pagesFetched = 1;
+  for (let page = 2; page <= maxPages; page += 1) {
+    if (uniq.size >= maxVehicles) break;
+
+    const url = makeApiUrl();
+    const payload = { ...basePayload, CurrentPage: page };
+
+    const resp = await axios.post(url, payload, {
+      headers: IAAI_HEADERS,
+      timeout: 20000,
+      validateStatus: () => true,
+      responseType: "text",
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity,
+    });
+
+    const contentType = resp?.headers?.["content-type"] || "";
+    const isHtml =
+      typeof resp?.data === "string" && contentType.includes("text/html");
+    if (!isHtml) break;
+
+    const pageVehicles = extractVehiclesFromHtml(resp.data, maxVehicles);
+    const added = addMany(pageVehicles);
+    pagesFetched = page;
+
+    // Stop when a page adds nothing new (likely end of results)
+    if (added <= 0) break;
+  }
+
+  return {
+    vehicles: Array.from(uniq.values()).slice(0, maxVehicles),
+    pagesFetched,
+  };
+}
+
 async function runOnceForUser(userId) {
   const st = getState(userId);
 
@@ -623,9 +695,23 @@ async function runOnceForUser(userId) {
         st.lastOutput += ` | saved html -> ${outPath}`;
       }
 
-      // IMPORTANT: don’t cap below your PageSize (you set PageSize=500)
-      const vehicles = extractVehiclesFromHtml(resp.data, 500);
+      const maxPages = Math.max(1, Number(process.env.IAAI_MAX_PAGES || 5));
+      const maxVehicles = Math.max(
+        1,
+        Number(process.env.IAAI_MAX_VEHICLES || 500),
+      );
+
+      const { vehicles, pagesFetched } = await fetchVehiclesPaged({
+        firstHtml: resp.data,
+        basePayload: payload,
+        maxPages,
+        maxVehicles,
+      });
+
       st.lastCount = vehicles.length;
+      if (maxPages > 1) {
+        st.lastOutput += ` | pages ${pagesFetched}/${maxPages} | vehicles ${vehicles.length}`;
+      }
 
       const { changes, nextSeen } = diffVehicles(st.lastSeen || {}, vehicles);
       st.lastSeen = nextSeen;
@@ -710,7 +796,14 @@ async function runOnceForUser(userId) {
           st.lastOutput += " | user has no email set";
         }
       } else {
-        st.lastOutput += " | no changes detected";
+        if ((changes || []).length <= 0) {
+          st.lastOutput += " | no changes detected";
+        } else if (droppedByBidRange > 0 || droppedByOdoRange > 0) {
+          st.lastOutput +=
+            " | changes detected but all were filtered out (adjust bid/odo filters)";
+        } else {
+          st.lastOutput += " | no changes after filters";
+        }
       }
     }
 
@@ -841,7 +934,13 @@ router.post("/run", authRequired, async (req, res) => {
   try {
     if (mode === "once") {
       const r = await runOnceForUser(userId);
-      return res.json({ ok: true, iaai: r.iaai, changesCount: r.changesCount });
+      return res.json({
+        ok: true,
+        iaai: r.iaai,
+        changesCount: r.changesCount,
+        emailed: !!r.emailed,
+        lastOutput: st.lastOutput,
+      });
     }
 
     if (mode === "start") {
@@ -885,6 +984,44 @@ router.post("/run", authRequired, async (req, res) => {
       text: st.lastOutput,
     };
     return res.status(500).json({ ok: false, msg: st.lastOutput });
+  }
+});
+
+// POST /api/bot/test-email
+// Sends a simple test email to the logged-in user's email address.
+router.post("/test-email", authRequired, async (req, res) => {
+  const userId = req.user.id;
+  try {
+    const r = await db.query(
+      "SELECT email, username, email_unsubscribed FROM users WHERE id = $1 LIMIT 1",
+      [userId],
+    );
+    const user = r.rows[0] || null;
+
+    if (!user?.email) {
+      return res
+        .status(400)
+        .json({ ok: false, msg: "No email set for this user" });
+    }
+
+    if (user?.email_unsubscribed) {
+      return res.status(400).json({
+        ok: false,
+        msg: "This user is marked as unsubscribed (email_unsubscribed=true)",
+      });
+    }
+
+    const subject = `IAAI-bot test email for ${user.username || "user"}`;
+    const meta = await sendTestEmail({ to: user.email, subject });
+    return res.json({ ok: true, to: user.email, subject, meta });
+  } catch (e) {
+    const details = e?.response?.body || e?.response?.text || null;
+    console.error("SendGrid test email error:", details || e);
+    return res.status(500).json({
+      ok: false,
+      msg: e?.message || "Failed to send test email",
+      details,
+    });
   }
 });
 

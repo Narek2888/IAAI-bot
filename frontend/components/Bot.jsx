@@ -14,6 +14,9 @@ export default function Bot({ disabled = false }) {
   const [runOnceHasEmail, setRunOnceHasEmail] = useState(null); // null | boolean
   const [runOnceBusy, setRunOnceBusy] = useState(false);
   const [runOnceChangesCount, setRunOnceChangesCount] = useState(null); // null | number
+  const [runOnceEmailed, setRunOnceEmailed] = useState(null); // null | boolean
+  const [runOnceLastOutput, setRunOnceLastOutput] = useState(null);
+  const [testEmailBusy, setTestEmailBusy] = useState(false);
 
   const inFlightRef = useRef(false);
   const loopIdRef = useRef(0); // increments to cancel previous loops
@@ -88,6 +91,8 @@ export default function Bot({ disabled = false }) {
     setRunOnceLoading(true);
     setRunOnceHasEmail(null);
     setRunOnceChangesCount(null);
+    setRunOnceEmailed(null);
+    setRunOnceLastOutput(null);
     setRunOnceBusy(true);
 
     const minSpinnerMs = 650;
@@ -100,11 +105,16 @@ export default function Bot({ disabled = false }) {
         setRunOnceLoading(false);
         setRunOnceHasEmail(null);
         setRunOnceChangesCount(null);
+        setRunOnceEmailed(null);
+        setRunOnceLastOutput(null);
         return alert(r?.msg || "Failed");
       }
 
       const c = Number(r?.changesCount);
       setRunOnceChangesCount(Number.isFinite(c) ? c : 0);
+
+      if (typeof r?.emailed === "boolean") setRunOnceEmailed(r.emailed);
+      if (r?.lastOutput) setRunOnceLastOutput(String(r.lastOutput));
 
       try {
         const settings = await apiGet("/api/bot/settings");
@@ -124,6 +134,26 @@ export default function Bot({ disabled = false }) {
       }
       setRunOnceLoading(false);
       setRunOnceBusy(false);
+    }
+  };
+
+  const sendTestEmail = async () => {
+    if (testEmailBusy) return;
+    setTestEmailBusy(true);
+    try {
+      const r = await apiPost("/api/bot/test-email", {});
+      if (!r?.ok) {
+        const details = r?.details ? `\n\n${JSON.stringify(r.details)}` : "";
+        alert((r?.msg || "Failed to send test email") + details);
+        return;
+      }
+      alert(
+        `Test email sent to ${r?.to || "your email"}.\n\nSendGrid status: ${
+          r?.meta?.statusCode ?? "?"
+        }`,
+      );
+    } finally {
+      setTestEmailBusy(false);
     }
   };
 
@@ -150,6 +180,9 @@ export default function Bot({ disabled = false }) {
       <h3>Bot</h3>
       <div>Running: {String(bot.running)}</div>
       <div>Auto-resume (saved): {String(bot.continuousEnabled)}</div>
+      <div style={{ marginTop: 8, color: "#6b7280", fontSize: 13 }}>
+        Last output: {bot.lastOutput ? String(bot.lastOutput) : "—"}
+      </div>
 
       <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
         <button onClick={runOnce} disabled={disabled || runOnceBusy}>
@@ -225,12 +258,58 @@ export default function Bot({ disabled = false }) {
               </div>
             ) : runOnceHasEmail ? (
               <div style={{ marginBottom: 12 }}>
-                Run once was made successfully. Check your email.
+                {runOnceEmailed === true
+                  ? "Updates were found and an email was sent."
+                  : runOnceEmailed === false
+                    ? "Updates were found, but email was not sent (see details below)."
+                    : "Updates were found. Check details below."}
               </div>
             ) : (
               <div style={{ marginBottom: 12 }}>
                 Updates were found, but your email is not configured. Please set
                 your email in Manage account.
+              </div>
+            )}
+
+            {!runOnceLoading && (runOnceLastOutput || bot.lastOutput) && (
+              <div
+                style={{
+                  marginBottom: 12,
+                  padding: 10,
+                  background: "#f9fafb",
+                  border: "1px solid #e5e7eb",
+                  borderRadius: 8,
+                  fontSize: 12,
+                  color: "#374151",
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                }}
+              >
+                {runOnceLastOutput || bot.lastOutput}
+              </div>
+            )}
+
+            {!runOnceLoading && (
+              <div
+                style={{
+                  display: "flex",
+                  gap: 8,
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: 12,
+                }}
+              >
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={sendTestEmail}
+                  disabled={testEmailBusy}
+                >
+                  {testEmailBusy ? "Sending…" : "Send test email"}
+                </button>
+                <div style={{ color: "#6b7280", fontSize: 12 }}>
+                  Tip: check Spam/Promotions too.
+                </div>
               </div>
             )}
             <div style={{ display: "flex", justifyContent: "flex-end" }}>

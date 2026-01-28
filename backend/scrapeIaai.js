@@ -87,8 +87,11 @@ function parseMoney(text) {
 function parseVehicleFromRow($, $row) {
   // Title + link (most reliable)
   const titleA = $row.find('h4 a[href^="/VehicleDetail/"]').first();
-  const title = titleA.text().trim() || null;
-  const vehicle_link = absUrl(titleA.attr("href"));
+  const anyLinkA = $row.find('a[href^="/VehicleDetail/"]').first();
+  const linkA = titleA.length ? titleA : anyLinkA;
+
+  const title = linkA.text().trim() || null;
+  const vehicle_link = absUrl(linkA.attr("href"));
 
   // Stock #
   const stock_id =
@@ -175,7 +178,9 @@ function extractVehiclesFromHtml(html, limit = 500) {
   const $ = cheerio.load(html);
 
   // Strategy A (preferred): DOM rows (contains Stock # / title / Buy Now)
-  const rows = $("div.table-row.table-row-border");
+  const rows = $(
+    "div.table-row.table-row-border, div.table-row, div.table-row-border",
+  );
   if (rows.length) {
     const parsed = rows
       .map((_, row) => {
@@ -218,6 +223,38 @@ function extractVehiclesFromHtml(html, limit = 500) {
     for (const v of parsed) {
       if (v?.vehicle_link && !byLink.has(v.vehicle_link))
         byLink.set(v.vehicle_link, v);
+    }
+
+    // Backfill: if markup changed and some rows were missed, fall back to ids
+    // found in the HTML (links/images). This keeps extraction closer to the UI count.
+    if (byLink.size < limit) {
+      const namesFromImages = uniq(
+        [...html.matchAll(/imageKeys=([A-Za-z0-9]+)~SID~I1/g)].map((m) => m[1]),
+      );
+
+      const namesFromLinks = uniq(
+        [...html.matchAll(/\/VehicleDetail\/([A-Za-z0-9]+)~US/g)].map(
+          (m) => m[1],
+        ),
+      );
+
+      const names = uniq([...namesFromImages, ...namesFromLinks]).filter((n) =>
+        isValidVehicleId(n),
+      );
+
+      for (const name of names) {
+        if (byLink.size >= limit) break;
+        const link = `${BASE_URL}/VehicleDetail/${name}~US`;
+        if (byLink.has(link)) continue;
+        byLink.set(link, {
+          title: null,
+          vehicle_link: link,
+          stock_id: null,
+          price: null,
+          odometer: null,
+          image: `<img src="https://vis.iaai.com/resizer?imageKeys=${name}~SID~I1&width=400&height=300" width="400" height="300" />`,
+        });
+      }
     }
 
     const out = Array.from(byLink.values()).slice(0, limit);

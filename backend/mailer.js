@@ -227,13 +227,62 @@ async function sendVehiclesEmail({ to, subject, vehicles, unsubscribeUrl }) {
       }
     : undefined;
 
-  await sgMail.send({
+  const [resp] = await sgMail.send({
     to,
     from,
     subject,
     html: htmlBody,
     headers,
   });
+
+  return {
+    statusCode: resp?.statusCode ?? null,
+    messageId:
+      resp?.headers?.["x-message-id"] ??
+      resp?.headers?.["x-message-id".toLowerCase()] ??
+      null,
+    requestId:
+      resp?.headers?.["x-request-id"] ??
+      resp?.headers?.["x-request-id".toLowerCase()] ??
+      null,
+  };
+}
+
+async function sendTestEmail({ to, subject }) {
+  const apiKey = requireEnv("SENDGRID_API_KEY");
+  const from = requireEnv("SENDGRID_FROM");
+
+  sgMail.setApiKey(apiKey);
+
+  const safeTo = esc(to);
+  const safeFrom = esc(from);
+  const safeSubject = esc(subject || "Test email");
+  const html = `
+    <div style="font-family: Arial, sans-serif;">
+      <h3 style="margin:0 0 10px 0;">${safeSubject}</h3>
+      <p style="margin:0 0 10px 0;">If you see this, SendGrid delivery from <strong>${safeFrom}</strong> to <strong>${safeTo}</strong> is working.</p>
+      <p style="margin:0; color:#6b7280; font-size: 12px;">Sent at: ${esc(new Date().toISOString())}</p>
+    </div>
+  `;
+
+  const [resp] = await sgMail.send({
+    to,
+    from,
+    subject: subject || "IAAI-bot test email",
+    html,
+  });
+
+  return {
+    statusCode: resp?.statusCode ?? null,
+    messageId:
+      resp?.headers?.["x-message-id"] ??
+      resp?.headers?.["x-message-id".toLowerCase()] ??
+      null,
+    requestId:
+      resp?.headers?.["x-request-id"] ??
+      resp?.headers?.["x-request-id".toLowerCase()] ??
+      null,
+  };
 }
 
 async function sendOtpEmail({ to, otp }) {
@@ -268,4 +317,4 @@ async function sendOtpEmail({ to, otp }) {
   });
 }
 
-module.exports = { sendVehiclesEmail, sendOtpEmail };
+module.exports = { sendVehiclesEmail, sendOtpEmail, sendTestEmail };
