@@ -16,7 +16,6 @@ export default function Bot({ disabled = false }) {
   const [runOnceChangesCount, setRunOnceChangesCount] = useState(null); // null | number
   const [runOnceEmailed, setRunOnceEmailed] = useState(null); // null | boolean
   const [runOnceLastOutput, setRunOnceLastOutput] = useState(null);
-  const [testEmailBusy, setTestEmailBusy] = useState(false);
 
   const inFlightRef = useRef(false);
   const loopIdRef = useRef(0); // increments to cancel previous loops
@@ -137,26 +136,6 @@ export default function Bot({ disabled = false }) {
     }
   };
 
-  const sendTestEmail = async () => {
-    if (testEmailBusy) return;
-    setTestEmailBusy(true);
-    try {
-      const r = await apiPost("/api/bot/test-email", {});
-      if (!r?.ok) {
-        const details = r?.details ? `\n\n${JSON.stringify(r.details)}` : "";
-        alert((r?.msg || "Failed to send test email") + details);
-        return;
-      }
-      alert(
-        `Test email sent to ${r?.to || "your email"}.\n\nSendGrid status: ${
-          r?.meta?.statusCode ?? "?"
-        }`,
-      );
-    } finally {
-      setTestEmailBusy(false);
-    }
-  };
-
   const start = async () => {
     const r = await apiPost("/api/bot/run?mode=start");
     if (!r?.ok) return alert(r?.msg || "Failed");
@@ -180,9 +159,6 @@ export default function Bot({ disabled = false }) {
       <h3>Bot</h3>
       <div>Running: {String(bot.running)}</div>
       <div>Auto-resume (saved): {String(bot.continuousEnabled)}</div>
-      <div style={{ marginTop: 8, color: "#6b7280", fontSize: 13 }}>
-        Last output: {bot.lastOutput ? String(bot.lastOutput) : "—"}
-      </div>
 
       <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
         <button onClick={runOnce} disabled={disabled || runOnceBusy}>
@@ -271,47 +247,6 @@ export default function Bot({ disabled = false }) {
               </div>
             )}
 
-            {!runOnceLoading && (runOnceLastOutput || bot.lastOutput) && (
-              <div
-                style={{
-                  marginBottom: 12,
-                  padding: 10,
-                  background: "#f9fafb",
-                  border: "1px solid #e5e7eb",
-                  borderRadius: 8,
-                  fontSize: 12,
-                  color: "#374151",
-                  whiteSpace: "pre-wrap",
-                  wordBreak: "break-word",
-                }}
-              >
-                {runOnceLastOutput || bot.lastOutput}
-              </div>
-            )}
-
-            {!runOnceLoading && (
-              <div
-                style={{
-                  display: "flex",
-                  gap: 8,
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  marginBottom: 12,
-                }}
-              >
-                <button
-                  type="button"
-                  className="secondary"
-                  onClick={sendTestEmail}
-                  disabled={testEmailBusy}
-                >
-                  {testEmailBusy ? "Sending…" : "Send test email"}
-                </button>
-                <div style={{ color: "#6b7280", fontSize: 12 }}>
-                  Tip: check Spam/Promotions too.
-                </div>
-              </div>
-            )}
             <div style={{ display: "flex", justifyContent: "flex-end" }}>
               <button
                 type="button"
