@@ -12,7 +12,8 @@ const { sendVehiclesEmail, sendTestEmail } = require("./mailer");
 const router = express.Router();
 
 const BASE_URL = "https://www.iaai.com";
-const makeApiUrl = () => `${BASE_URL}/Search?c=${Date.now()}`;
+const makeIaaiApiUrl = () => `${BASE_URL}/Search?c=${Date.now()}`;
+const COPART_API_URL = "https://www.copart.com/public/lots/search";
 
 const IAAI_HEADERS = {
   "User-Agent":
@@ -25,23 +26,52 @@ const IAAI_HEADERS = {
   "X-Requested-With": "XMLHttpRequest",
 };
 
-// per-user bot state
-const states = new Map(); // userId -> state
+const COPART_HEADERS = {
+  "User-Agent": IAAI_HEADERS["User-Agent"],
+  Accept: "application/json, text/plain, */*",
+  "Content-Type": "application/json",
+  Origin: "https://www.copart.com",
+  Referer: "https://www.copart.com/lotSearchResults",
+};
 
-async function setBotContinuous(userId, enabled) {
-  await db.query("UPDATE users SET bot_continuous = $1 WHERE id = $2", [
+const SOURCE_IAAI = "IAAI";
+const SOURCE_COPART = "COPART";
+const SUPPORTED_SOURCES = [SOURCE_IAAI, SOURCE_COPART];
+
+function normalizeAuctionSource(v) {
+  const s = String(v || "")
+    .trim()
+    .toUpperCase();
+  return s === SOURCE_COPART ? SOURCE_COPART : SOURCE_IAAI;
+}
+
+function getBotContinuousColumn(source) {
+  return source === SOURCE_COPART ? "copart_bot_continuous" : "bot_continuous";
+}
+
+function getStateKey(userId, source) {
+  return `${userId}:${source}`;
+}
+
+// per-user, per-source bot state
+const states = new Map();
+
+async function setBotContinuous(userId, enabled, source = SOURCE_IAAI) {
+  const column = getBotContinuousColumn(source);
+  await db.query(`UPDATE users SET ${column} = $1 WHERE id = $2`, [
     !!enabled,
     userId,
   ]);
 }
 
-async function getBotContinuous(userId) {
+async function getBotContinuous(userId, source = SOURCE_IAAI) {
+  const column = getBotContinuousColumn(source);
   const r = await db.query(
-    "SELECT bot_continuous FROM users WHERE id = $1 LIMIT 1",
+    `SELECT ${column} FROM users WHERE id = $1 LIMIT 1`,
     [userId],
   );
   const row = r.rows[0];
-  return row ? !!row.bot_continuous : false;
+  return row ? !!row[column] : false;
 }
 
 async function ensureUnsubscribeToken(userId) {
@@ -79,9 +109,10 @@ function hasAnyFiltersSet(u) {
   ].some((v) => v !== null && v !== undefined && String(v).trim() !== "");
 }
 
-function getState(userId) {
-  if (!states.has(userId)) {
-    states.set(userId, {
+function getState(userId, source = SOURCE_IAAI) {
+  const key = getStateKey(userId, source);
+  if (!states.has(key)) {
+    states.set(key, {
       running: false,
       inFlight: false,
       lastOutput: null,
@@ -102,68 +133,100 @@ function getState(userId) {
       lastStatusJson: null,
       lastStatusEtag: null,
 
-      lastIaaiRequest: null,
-      lastIaaiResponse: null,
+      lastRequest: null,
+      lastResponse: null,
       lastUserFilters: null,
     });
   }
-  return states.get(userId);
+  return states.get(key);
 }
 
-async function resetLastSeenForUser(userId) {
-  const st = getState(userId);
-
-  // Don't reset in the middle of an active poll; defer to the next run.
-  if (st.inFlight) {
+async function resetLastSeenForUser(userId, source = null) {
+  const st = source ? getState(userId, source) : null;
+  if (st && st.inFlight) {
     st.pendingLastSeenReset = true;
     st.lastStatusJson = null;
     return { ok: true, deferred: true };
   }
 
-  st.pendingLastSeenReset = false;
-  st.lastSeen = {};
-  st.lastSeenLoaded = true;
-  st.lastStatusJson = null;
+  if (st) {
+    st.pendingLastSeenReset = false;
+    st.lastSeen = {};
+    st.lastSeenLoaded = true;
+  }
 
-  await saveLastSeen(userId, {});
-  return { ok: true, deferred: false };
+  const r = await db.query(
+    "SELECT last_seen FROM bot_states WHERE user_id = $1 LIMIT 1",
+    [userId],
+  );
+  const raw = r.rows[0]?.last_seen;
+  const data = raw && typeof raw === "object" ? raw : {};
+
+  if (source) {
+    data[source] = {};
+  } else {
+    for (const s of SUPPORTED_SOURCES) {
+      data[s] = {};
+    }
+  }
+
+  await db.query(
+    `INSERT INTO bot_states (user_id, last_seen, updated_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (user_id)
+       DO UPDATE SET last_seen = EXCLUDED.last_seen, updated_at = NOW()`,
+    [userId, data],
+  );
+
+  return { ok: true, source };
 }
 
-async function loadLastSeen(userId) {
+async function loadLastSeen(userId, source = SOURCE_IAAI) {
   try {
     const r = await db.query(
       "SELECT last_seen FROM bot_states WHERE user_id = $1 LIMIT 1",
       [userId],
     );
-    return r.rows[0]?.last_seen && typeof r.rows[0].last_seen === "object"
-      ? r.rows[0].last_seen
-      : {};
+    const raw = r.rows[0]?.last_seen;
+    const data = raw && typeof raw === "object" ? raw : {};
+    return data[source] && typeof data[source] === "object" ? data[source] : {};
   } catch (e) {
-    // If table doesn't exist yet or query fails, fall back to empty.
     return {};
   }
 }
 
-async function saveLastSeen(userId, lastSeen) {
+async function saveLastSeen(userId, lastSeen, source = SOURCE_IAAI) {
   try {
+    const r = await db.query(
+      "SELECT last_seen FROM bot_states WHERE user_id = $1 LIMIT 1",
+      [userId],
+    );
+    const raw = r.rows[0]?.last_seen;
+    const data = raw && typeof raw === "object" ? raw : {};
+    data[source] = lastSeen || {};
     await db.query(
       `INSERT INTO bot_states (user_id, last_seen, updated_at)
        VALUES ($1, $2, NOW())
        ON CONFLICT (user_id)
        DO UPDATE SET last_seen = EXCLUDED.last_seen, updated_at = NOW()`,
-      [userId, lastSeen || {}],
+      [userId, data],
     );
   } catch {
     // ignore
   }
 }
 
-async function refreshContinuousState(userId, st, maxAgeMs = 5000) {
+async function refreshContinuousState(
+  userId,
+  st,
+  source = SOURCE_IAAI,
+  maxAgeMs = 5000,
+) {
   const now = Date.now();
   if (st.continuousEnabled !== null && now - st.lastContinuousAt < maxAgeMs) {
     return st.continuousEnabled;
   }
-  const enabled = await getBotContinuous(userId);
+  const enabled = await getBotContinuous(userId, source);
   st.continuousEnabled = enabled;
   st.lastContinuousAt = now;
   return enabled;
@@ -281,11 +344,28 @@ function filterVehiclesByOdoRange(vehicles, u) {
   return (vehicles || []).filter((v) => {
     const raw = v?.odometer ?? v?.odo ?? v?.mileage ?? null;
     const miles = parseOdometerToNumber(raw);
-    // If odometer is missing/unparseable in the scraped HTML, don't drop the item.
-    // The IAAI Search payload already applies server-side filtering.
     if (miles === null) return true;
     if (from !== null && miles < from) return false;
     if (to !== null && miles > to) return false;
+    return true;
+  });
+}
+
+function filterVehiclesByBuyItNow(vehicles) {
+  return (vehicles || []).filter((v) => v?.buy_it_now === true);
+}
+
+function filterVehiclesByYearRange(vehicles, u) {
+  const from = toNumberOrNull(u?.year_from);
+  const to = toNumberOrNull(u?.year_to);
+
+  if (from === null && to === null) return vehicles || [];
+
+  return (vehicles || []).filter((v) => {
+    const year = toNumberOrNull(v?.year);
+    if (year === null) return true;
+    if (from !== null && year < from) return false;
+    if (to !== null && year > to) return false;
     return true;
   });
 }
@@ -441,15 +521,152 @@ function buildIaaiPayloadFromUserFilters(u) {
   };
 }
 
-async function fetchUserFilters(userId) {
+function buildCopartPayloadFromUserFilters(u) {
+  const minBid = toNumberOrNull(u.min_bid);
+  const maxBid = toNumberOrNull(u.max_bid);
+
+  // Filter directly on bnp (buy now price) — a numeric field in the Solr index.
+  // This both restricts to BIN-only lots (bnp >= 1) and applies price range
+  // server-side. buy_it_now_code:B1 is ignored by the public endpoint.
+  const binFrom = minBid !== null ? minBid : 1;
+  const binTo = maxBid !== null ? maxBid : "*";
+
+  const filter = {
+    FETI: [`bnp:[${binFrom} TO ${binTo}]`],
+  };
+
+  const yearFrom = toNumberOrNull(u.year_from);
+  const yearTo = toNumberOrNull(u.year_to);
+  if (yearFrom !== null || yearTo !== null) {
+    filter.YEAR = [
+      `lot_year:[${yearFrom ?? 1900} TO ${yearTo ?? new Date().getFullYear() + 1}]`,
+    ];
+  }
+
+  const odoFrom = toNumberOrNull(u.odo_from);
+  const odoTo = toNumberOrNull(u.odo_to);
+  if (odoFrom !== null || odoTo !== null) {
+    filter.ODM = [
+      `odometer_reading_received:[${odoFrom ?? 0} TO ${odoTo ?? 999999}]`,
+    ];
+  }
+
+  const includeTagByField = { FETI: "{!tag=FETI}" };
+  if (filter.ODM) includeTagByField.ODM = "{!tag=ODM} ";
+  if (filter.YEAR) includeTagByField.YEAR = "{!tag=YEAR}";
+
+  const searchQuery = String(u.full_search || "").trim();
+
+  return {
+    query: searchQuery ? [searchQuery] : ["*"],
+    filter,
+    sort: [
+      "bnp asc",
+      "salelight_priority asc",
+      "member_damage_group_priority asc",
+      "auction_date_type desc",
+      "auction_date_utc asc",
+    ],
+    page: 0,
+    size: 100,
+    start: 0,
+    watchListOnly: false,
+    freeFormSearch: true,
+    hideImages: false,
+    defaultSort: false,
+    specificRowProvided: false,
+    displayName: "",
+    searchName: "",
+    backUrl: "",
+    includeTagByField,
+    rawParams: {},
+  };
+}
+
+function buildCopartLotLink(item) {
+  const lotNumber = String(item?.ln || item?.lotNumberStr || "").trim();
+  if (lotNumber) return `https://www.copart.com/lot/${lotNumber}`;
+  return null;
+}
+
+function extractVehiclesFromCopartResponse(resp, maxItems = 500) {
+  const data = resp?.data;
+  let json = null;
+  if (typeof data === "object" && data !== null) {
+    json = data;
+  } else if (typeof data === "string") {
+    try {
+      json = JSON.parse(data);
+    } catch {
+      json = null;
+    }
+  }
+
+  const content = json?.data?.results?.content;
+  if (!Array.isArray(content)) return [];
+
+  const vehicles = [];
+  for (const item of content) {
+    if (!item || typeof item !== "object") continue;
+    const stockId = String(
+      item.ln || item.lotNumberStr || item.lotNumber || "",
+    ).trim();
+    // bnp = Buy It Now price; hb = highest bid. Use ?? so 0 is a valid price.
+    const rawPrice = item.bnp ?? (item.hb > 0 ? item.hb : null);
+    const price = rawPrice != null ? String(rawPrice) : null;
+    const link = buildCopartLotLink(item);
+    // tims = thumbnail image source (full CDN URL); lh is a hash, not a URL
+    const image = item.tims || item.image || null;
+    const title = item.ld || item.lm || item.mkn || item.title || null;
+    // lcy = lot calendar year; orr = odometer reading received
+    const year = item.lcy != null ? item.lcy : null;
+    const odometer = item.orr != null ? item.orr : null;
+    // bnp = Buy It Now price; positive value confirms BIN lot
+    const buy_it_now = item.bnp != null && Number(item.bnp) > 0;
+
+    if (vehicles.length === 0) {
+      // Log first item fields to help diagnose image/BIN issues
+      console.log("[copart-debug] first item fields:", {
+        ln: item.ln, bnp: item.bnp, bndc: item.bndc,
+        tims: item.tims, lh: item.lh, iuq: item.iuq,
+        lcy: item.lcy, orr: item.orr,
+      });
+    }
+
+    vehicles.push({
+      stock_id: stockId || null,
+      price: price === null ? null : String(price).trim(),
+      vehicle_link: link,
+      image,
+      title,
+      year,
+      odometer,
+      buy_it_now,
+      source: SOURCE_COPART,
+    });
+
+    if (vehicles.length >= maxItems) break;
+  }
+
+  return vehicles;
+}
+
+async function fetchUserFilters(userId, source = SOURCE_IAAI) {
+  const prefix = source === SOURCE_COPART ? "copart_" : "";
   const r = await db.query(
     `SELECT
-      filter_name,
-      full_search,
-      year_from, year_to,
-      auction_type, inventory_type, inventory_types, fuel_type, fuel_types,
-      min_bid, max_bid,
-      odo_from, odo_to
+      ${prefix}filter_name AS filter_name,
+      ${prefix}full_search AS full_search,
+      ${prefix}year_from AS year_from, ${prefix}year_to AS year_to,
+      ${prefix}auction_type AS auction_type,
+      ${prefix}inventory_type AS inventory_type,
+      ${prefix}inventory_types AS inventory_types,
+      ${prefix}fuel_type AS fuel_type,
+      ${prefix}fuel_types AS fuel_types,
+      ${prefix}min_bid AS min_bid,
+      ${prefix}max_bid AS max_bid,
+      ${prefix}odo_from AS odo_from,
+      ${prefix}odo_to AS odo_to
      FROM users
      WHERE id = $1`,
     [userId],
@@ -457,17 +674,24 @@ async function fetchUserFilters(userId) {
   return r.rows[0] || null;
 }
 
-async function fetchUserBotSettings(userId) {
+async function fetchUserBotSettings(userId, source = SOURCE_IAAI) {
+  const prefix = source === SOURCE_COPART ? "copart_" : "";
   const r = await db.query(
     `SELECT
       email,
-      bot_continuous,
-      filter_name,
-      full_search,
-      year_from, year_to,
-      auction_type, inventory_type, inventory_types, fuel_type, fuel_types,
-      min_bid, max_bid,
-      odo_from, odo_to
+      ${getBotContinuousColumn(source)} AS bot_continuous,
+      ${prefix}filter_name AS filter_name,
+      ${prefix}full_search AS full_search,
+      ${prefix}year_from AS year_from, ${prefix}year_to AS year_to,
+      ${prefix}auction_type AS auction_type,
+      ${prefix}inventory_type AS inventory_type,
+      ${prefix}inventory_types AS inventory_types,
+      ${prefix}fuel_type AS fuel_type,
+      ${prefix}fuel_types AS fuel_types,
+      ${prefix}min_bid AS min_bid,
+      ${prefix}max_bid AS max_bid,
+      ${prefix}odo_from AS odo_from,
+      ${prefix}odo_to AS odo_to
      FROM users
      WHERE id = $1`,
     [userId],
@@ -475,20 +699,19 @@ async function fetchUserBotSettings(userId) {
   return r.rows[0] || null;
 }
 
-async function startContinuousForUser(userId) {
-  const st = getState(userId);
+async function startContinuousForUser(userId, source = SOURCE_IAAI) {
+  const st = getState(userId, source);
 
   // Idempotent: if already running, do nothing
   if (st.running && st.timer) return;
 
-  // Only start if user has some filters configured
-  const filters = await fetchUserFilters(userId);
+  const filters = await fetchUserFilters(userId, source);
   if (!hasAnyFiltersSet(filters)) {
     st.running = false;
     if (st.timer) clearInterval(st.timer);
     st.timer = null;
     st.lastRunAt = Date.now();
-    st.lastOutput = "Not started: no filters saved for this user";
+    st.lastOutput = `${source} not started: no filters saved for this user`;
     return;
   }
 
@@ -496,15 +719,15 @@ async function startContinuousForUser(userId) {
   st.running = true;
 
   // Run immediately once, then schedule
-  await runOnceForUser(userId);
+  await runOnceForUser(userId, source);
 
   const pollMs = Number(process.env.BOT_POLL_MS || 10 * 60 * 1000);
   st.timer = setInterval(() => {
-    runOnceForUser(userId).catch((e) => {
+    runOnceForUser(userId, source).catch((e) => {
       console.error("Bot interval error:", e);
       st.lastRunAt = Date.now();
-      st.lastOutput = `IAAI error: ${e?.message || "unknown error"}`;
-      st.lastIaaiResponse = {
+      st.lastOutput = `${source} error: ${e?.message || "unknown error"}`;
+      st.lastResponse = {
         status: null,
         contentType: "error",
         text: st.lastOutput,
@@ -515,41 +738,41 @@ async function startContinuousForUser(userId) {
   if (typeof st.timer.unref === "function") st.timer.unref();
 }
 
-function stopContinuousForUser(userId) {
-  const st = getState(userId);
+function stopContinuousForUser(userId, source = SOURCE_IAAI) {
+  const st = getState(userId, source);
   st.running = false;
   if (st.timer) clearInterval(st.timer);
   st.timer = null;
 }
 
-function summarizeIaaiResponse(resp) {
+function summarizeResponse(resp, source) {
   const status = resp?.status;
   const contentType = resp?.headers?.["content-type"] || "unknown";
   const data = resp?.data;
+  const prefix = String(source || SOURCE_IAAI).toUpperCase();
 
   if (typeof data === "string") {
     const snippet = data.slice(0, 600);
-    return `IAAI response: HTTP ${status} (${contentType}), text[0..600]=${JSON.stringify(
+    return `${prefix} response: HTTP ${status} (${contentType}), text[0..600]=${JSON.stringify(
       snippet,
     )}`;
   }
 
   if (data && typeof data === "object") {
     const keys = Object.keys(data).slice(0, 30);
-    return `IAAI response: HTTP ${status} (${contentType}), json keys=${keys.join(
+    return `${prefix} response: HTTP ${status} (${contentType}), json keys=${keys.join(
       ", ",
     )}`;
   }
 
-  return `IAAI response: HTTP ${status} (${contentType}), type=${typeof data}`;
+  return `${prefix} response: HTTP ${status} (${contentType}), type=${typeof data}`;
 }
 
-function extractIaaiData(resp, maxChars = 8000) {
+function extractResponseData(resp, maxChars = 8000) {
   const status = resp?.status ?? null;
   const contentType = resp?.headers?.["content-type"] || "unknown";
   const data = resp?.data;
 
-  // Only return JSON object when response is JSON-like
   if (
     contentType.includes("application/json") &&
     data &&
@@ -558,7 +781,6 @@ function extractIaaiData(resp, maxChars = 8000) {
     return { status, contentType, json: data };
   }
 
-  // Otherwise return a truncated text snippet
   const text =
     typeof data === "string"
       ? data
@@ -606,7 +828,7 @@ async function fetchVehiclesPaged({
   for (let page = 2; page <= maxPages; page += 1) {
     if (uniq.size >= maxVehicles) break;
 
-    const url = makeApiUrl();
+    const url = makeIaaiApiUrl();
     const payload = { ...basePayload, CurrentPage: page };
 
     const resp = await axios.post(url, payload, {
@@ -637,8 +859,8 @@ async function fetchVehiclesPaged({
   };
 }
 
-async function runOnceForUser(userId) {
-  const st = getState(userId);
+async function runOnceForUser(userId, source = SOURCE_IAAI) {
+  const st = getState(userId, source);
 
   let changesCount = 0;
   let emailed = false;
@@ -647,48 +869,72 @@ async function runOnceForUser(userId) {
     st.pendingLastSeenReset = false;
     st.lastSeen = {};
     st.lastSeenLoaded = true;
-    await saveLastSeen(userId, {});
+    await saveLastSeen(userId, {}, source);
   }
 
   if (!st.lastSeenLoaded) {
-    st.lastSeen = await loadLastSeen(userId);
+    st.lastSeen = await loadLastSeen(userId, source);
     st.lastSeenLoaded = true;
   }
 
-  // Prevent overlap if interval fires while a request is still running
   if (st.inFlight) {
-    st.lastOutput = "IAAI poll skipped (previous poll still running)";
-    return { iaai: st.lastIaaiResponse, changesCount: 0, emailed: false };
+    st.lastOutput = `${source} poll skipped (previous poll still running)`;
+    return { response: st.lastResponse, changesCount: 0, emailed: false };
   }
 
   st.inFlight = true;
   try {
-    const u = await fetchUserFilters(userId);
+    const u = await fetchUserFilters(userId, source);
     st.lastUserFilters = u || null;
 
-    const payload = buildIaaiPayloadFromUserFilters(u || {});
-    const url = makeApiUrl();
-    st.lastIaaiRequest = { url, payload };
+    let payload;
+    let url;
+    let headers;
+    if (source === SOURCE_COPART) {
+      payload = buildCopartPayloadFromUserFilters(u || {});
+      url = COPART_API_URL;
+      headers = COPART_HEADERS;
+    } else {
+      payload = buildIaaiPayloadFromUserFilters(u || {});
+      url = makeIaaiApiUrl();
+      headers = IAAI_HEADERS;
+    }
+
+    st.lastRequest = { url, payload };
 
     const resp = await axios.post(url, payload, {
-      headers: IAAI_HEADERS,
+      headers,
       timeout: 20000,
       validateStatus: () => true,
-
       responseType: "text",
       maxContentLength: Infinity,
       maxBodyLength: Infinity,
     });
 
     st.lastRunAt = Date.now();
-    st.lastOutput = summarizeIaaiResponse(resp);
-    st.lastIaaiResponse = extractIaaiData(resp);
+    st.lastOutput = summarizeResponse(resp, source);
+    st.lastResponse = extractResponseData(resp);
 
     const contentType = resp?.headers?.["content-type"] || "";
     const isHtml =
       typeof resp?.data === "string" && contentType.includes("text/html");
 
-    if (isHtml) {
+    let vehicles = [];
+    if (source === SOURCE_COPART) {
+      if (String(process.env.DEBUG_COPART_JSON || "") === "1") {
+        try {
+          const outPath = path.join(process.cwd(), "copart-response.json");
+          const body = typeof resp.data === "string" ? resp.data : JSON.stringify(resp.data, null, 2);
+          fs.writeFileSync(outPath, body, "utf8");
+          st.lastOutput += ` | saved copart json -> ${outPath}`;
+        } catch (e) {
+          st.lastOutput += ` | failed to save copart json: ${e?.message}`;
+        }
+      }
+      vehicles = extractVehiclesFromCopartResponse(resp);
+      st.lastCount = vehicles.length;
+      st.lastOutput += ` | vehicles ${vehicles.length}`;
+    } else if (isHtml) {
       if (String(process.env.DEBUG_IAAI_HTML || "") === "1") {
         const outPath = path.join(process.cwd(), "iaai-response.html");
         fs.writeFileSync(outPath, resp.data, "utf8");
@@ -701,113 +947,141 @@ async function runOnceForUser(userId) {
         Number(process.env.IAAI_MAX_VEHICLES || 500),
       );
 
-      const { vehicles, pagesFetched } = await fetchVehiclesPaged({
+      const paged = await fetchVehiclesPaged({
         firstHtml: resp.data,
         basePayload: payload,
         maxPages,
         maxVehicles,
       });
 
+      vehicles = paged.vehicles;
       st.lastCount = vehicles.length;
       if (maxPages > 1) {
-        st.lastOutput += ` | pages ${pagesFetched}/${maxPages} | vehicles ${vehicles.length}`;
-      }
-
-      const { changes, nextSeen } = diffVehicles(st.lastSeen || {}, vehicles);
-      st.lastSeen = nextSeen;
-      await saveLastSeen(userId, nextSeen);
-
-      const filteredByBid = filterVehiclesByBidRange(changes, u || {});
-      const filteredChanges = filterVehiclesByOdoRange(filteredByBid, u || {});
-
-      const droppedByBidRange = changes.length - filteredByBid.length;
-      const droppedByOdoRange = filteredByBid.length - filteredChanges.length;
-
-      changesCount = filteredChanges.length;
-
-      if (droppedByBidRange > 0) {
-        st.lastOutput += ` | dropped ${droppedByBidRange} out-of-bid-range update(s)`;
-      }
-      if (droppedByOdoRange > 0) {
-        st.lastOutput += ` | dropped ${droppedByOdoRange} out-of-odo-range update(s)`;
-      }
-
-      if (filteredChanges.length > 0) {
-        const userRes = await db.query(
-          "SELECT email, username, email_unsubscribed, unsubscribe_token FROM users WHERE id = $1",
-          [userId],
-        );
-        const user = userRes.rows[0];
-
-        if (user?.email && !user?.email_unsubscribed) {
-          try {
-            if (String(process.env.DEBUG_EMAIL_VEHICLES || "") === "1") {
-              const sample = filteredChanges[0] || null;
-              if (sample) {
-                console.log("[email-debug] sample vehicle", {
-                  userId,
-                  email: user.email,
-                  changes: filteredChanges.length,
-                  title: sample.title ?? null,
-                  vehicle_link: sample.vehicle_link ?? null,
-                  stock_id: sample.stock_id ?? null,
-                  price: sample.price ?? null,
-                  image_src: extractImgSrc(sample.image),
-                });
-              } else {
-                console.log("[email-debug] no sample vehicle", {
-                  userId,
-                  email: user.email,
-                  changes: 0,
-                });
-              }
-            }
-
-            const token = await ensureUnsubscribeToken(userId);
-            const appBase = String(
-              process.env.APP_BASE_URL ||
-                process.env.PUBLIC_BASE_URL ||
-                process.env.PUBLIC_URL ||
-                `http://127.0.0.1:${process.env.PORT || 5174}`,
-            )
-              .trim()
-              .replace(/\/$/, "");
-            const unsubscribeUrl = `${appBase}/unsubscribe?token=${encodeURIComponent(
-              token,
-            )}`;
-
-            await sendVehiclesEmail({
-              to: user.email,
-              subject: `IAAI updates for ${user.username} (${filteredChanges.length})`,
-              vehicles: filteredChanges,
-              unsubscribeUrl,
-            });
-            emailed = true;
-            st.lastOutput += ` | emailed ${filteredChanges.length} update(s)`;
-          } catch (e) {
-            console.error("SendGrid error:", e?.response?.body || e);
-            st.lastOutput += ` | email failed: ${
-              e?.message || "unknown error"
-            }`;
-          }
-        } else if (user?.email && user?.email_unsubscribed) {
-          st.lastOutput += " | user unsubscribed from emails";
-        } else {
-          st.lastOutput += " | user has no email set";
-        }
-      } else {
-        if ((changes || []).length <= 0) {
-          st.lastOutput += " | no changes detected";
-        } else if (droppedByBidRange > 0 || droppedByOdoRange > 0) {
-          st.lastOutput +=
-            " | changes detected but all were filtered out (adjust bid/odo filters)";
-        } else {
-          st.lastOutput += " | no changes after filters";
-        }
+        st.lastOutput += ` | pages ${paged.pagesFetched}/${maxPages} | vehicles ${vehicles.length}`;
       }
     }
 
-    return { iaai: st.lastIaaiResponse, changesCount, emailed };
+    const { changes, nextSeen } = diffVehicles(st.lastSeen || {}, vehicles);
+    st.lastSeen = nextSeen;
+    await saveLastSeen(userId, nextSeen, source);
+
+    // For Copart: BIN-only first, then price range on BIN price, then odo/year.
+    // For IAAI: bid range, then odo.
+    let filteredChanges;
+    let droppedByBidRange = 0;
+    let droppedByOdoRange = 0;
+    let droppedByYearRange = 0;
+    let droppedByBin = 0;
+
+    if (source === SOURCE_COPART) {
+      const afterBin = filterVehiclesByBuyItNow(changes);
+      droppedByBin = changes.length - afterBin.length;
+
+      const afterBid = filterVehiclesByBidRange(afterBin, u || {});
+      droppedByBidRange = afterBin.length - afterBid.length;
+
+      const afterOdo = filterVehiclesByOdoRange(afterBid, u || {});
+      droppedByOdoRange = afterBid.length - afterOdo.length;
+
+      filteredChanges = filterVehiclesByYearRange(afterOdo, u || {});
+      droppedByYearRange = afterOdo.length - filteredChanges.length;
+    } else {
+      const afterBid = filterVehiclesByBidRange(changes, u || {});
+      droppedByBidRange = changes.length - afterBid.length;
+
+      filteredChanges = filterVehiclesByOdoRange(afterBid, u || {});
+      droppedByOdoRange = afterBid.length - filteredChanges.length;
+    }
+
+    changesCount = filteredChanges.length;
+
+    if (droppedByBidRange > 0) {
+      st.lastOutput += ` | dropped ${droppedByBidRange} out-of-bid-range update(s)`;
+    }
+    if (droppedByOdoRange > 0) {
+      st.lastOutput += ` | dropped ${droppedByOdoRange} out-of-odo-range update(s)`;
+    }
+    if (droppedByYearRange > 0) {
+      st.lastOutput += ` | dropped ${droppedByYearRange} out-of-year-range update(s)`;
+    }
+    if (droppedByBin > 0) {
+      st.lastOutput += ` | dropped ${droppedByBin} non-buy-it-now update(s)`;
+    }
+
+    if (filteredChanges.length > 0) {
+      const userRes = await db.query(
+        "SELECT email, username, email_unsubscribed, unsubscribe_token FROM users WHERE id = $1",
+        [userId],
+      );
+      const user = userRes.rows[0];
+
+      if (user?.email && !user?.email_unsubscribed) {
+        try {
+          if (String(process.env.DEBUG_EMAIL_VEHICLES || "") === "1") {
+            const sample = filteredChanges[0] || null;
+            if (sample) {
+              console.log("[email-debug] sample vehicle", {
+                userId,
+                email: user.email,
+                changes: filteredChanges.length,
+                title: sample.title ?? null,
+                vehicle_link: sample.vehicle_link ?? null,
+                stock_id: sample.stock_id ?? null,
+                price: sample.price ?? null,
+                image_src: extractImgSrc(sample.image),
+              });
+            } else {
+              console.log("[email-debug] no sample vehicle", {
+                userId,
+                email: user.email,
+                changes: 0,
+              });
+            }
+          }
+
+          const token = await ensureUnsubscribeToken(userId);
+          const appBase = String(
+            process.env.APP_BASE_URL ||
+              process.env.PUBLIC_BASE_URL ||
+              process.env.PUBLIC_URL ||
+              `http://127.0.0.1:${process.env.PORT || 5174}`,
+          )
+            .trim()
+            .replace(/\/$/, "");
+          const unsubscribeUrl = `${appBase}/unsubscribe?token=${encodeURIComponent(
+            token,
+          )}`;
+
+          await sendVehiclesEmail({
+            to: user.email,
+            subject: `${source} updates for ${user.username} (${filteredChanges.length})`,
+            vehicles: filteredChanges,
+            unsubscribeUrl,
+            source,
+          });
+          emailed = true;
+          st.lastOutput += ` | emailed ${filteredChanges.length} update(s)`;
+        } catch (e) {
+          console.error("SendGrid error:", e?.response?.body || e);
+          st.lastOutput += ` | email failed: ${e?.message || "unknown error"}`;
+        }
+      } else if (user?.email && user?.email_unsubscribed) {
+        st.lastOutput += " | user unsubscribed from emails";
+      } else {
+        st.lastOutput += " | user has no email set";
+      }
+    } else {
+      if ((changes || []).length <= 0) {
+        st.lastOutput += " | no changes detected";
+      } else if (droppedByBidRange > 0 || droppedByOdoRange > 0 || droppedByBin > 0) {
+        st.lastOutput +=
+          " | changes detected but all were filtered out (adjust filters)";
+      } else {
+        st.lastOutput += " | no changes after filters";
+      }
+    }
+
+    return { response: st.lastResponse, changesCount, emailed };
   } finally {
     st.inFlight = false;
   }
@@ -817,19 +1091,28 @@ async function runOnceForUser(userId) {
 // This is used by the frontend when the user accepts an app update.
 router.post("/resume", authRequired, async (req, res) => {
   const userId = req.user.id;
-  const st = getState(userId);
+  const requestedSource = req.query.source
+    ? normalizeAuctionSource(req.query.source)
+    : null;
   try {
-    const enabled = await getBotContinuous(userId);
-    if (!enabled)
-      return res.json({ ok: true, resumed: false, reason: "disabled" });
+    const sources = requestedSource ? [requestedSource] : SUPPORTED_SOURCES;
 
-    const alreadyRunning = !!(st.running && st.timer);
-    await startContinuousForUser(userId);
-    const nowRunning = !!(st.running && st.timer);
+    const resumed = [];
+    for (const source of sources) {
+      const enabled = await getBotContinuous(userId, source);
+      if (!enabled) continue;
+      const st = getState(userId, source);
+      const alreadyRunning = !!(st.running && st.timer);
+      await startContinuousForUser(userId, source);
+      if (st.running && st.timer) {
+        resumed.push({ source, alreadyRunning });
+      }
+    }
+
     return res.json({
       ok: true,
-      resumed: nowRunning,
-      alreadyRunning,
+      resumed: resumed.length > 0,
+      details: resumed,
     });
   } catch (e) {
     console.error("Bot resume failed:", e);
@@ -840,7 +1123,10 @@ router.post("/resume", authRequired, async (req, res) => {
 // GET /api/bot/status
 router.get("/status", authRequired, async (req, res) => {
   const userId = req.user.id;
-  const st = getState(userId);
+  const source = req.query.source
+    ? normalizeAuctionSource(req.query.source)
+    : SOURCE_IAAI;
+  const st = getState(userId, source);
   const debug = String(req.query.debug || "") === "1";
 
   // Coalesce frequent status calls (e.g. refresh + polling)
@@ -861,7 +1147,7 @@ router.get("/status", authRequired, async (req, res) => {
   // Include persisted preference for UI (survives restarts/deploys)
   let continuousEnabled = st.continuousEnabled;
   try {
-    continuousEnabled = await refreshContinuousState(userId, st);
+    continuousEnabled = await refreshContinuousState(userId, st, source);
   } catch (e) {
     // Don't fail status if DB read fails; just omit preference.
     console.error("Failed to read bot_continuous:", e);
@@ -869,6 +1155,7 @@ router.get("/status", authRequired, async (req, res) => {
 
   const payload = {
     ok: true,
+    source,
     bot: {
       running: !!st.running,
       continuousEnabled,
@@ -877,8 +1164,8 @@ router.get("/status", authRequired, async (req, res) => {
       ...(debug
         ? {
             lastUserFilters: st.lastUserFilters,
-            lastIaaiRequest: st.lastIaaiRequest,
-            lastIaaiResponse: st.lastIaaiResponse,
+            lastRequest: st.lastRequest,
+            lastResponse: st.lastResponse,
           }
         : {}),
     },
@@ -901,9 +1188,12 @@ router.get("/status", authRequired, async (req, res) => {
 router.get("/settings", authRequired, async (req, res) => {
   try {
     const userId = req.user.id;
-    const st = getState(userId);
+    const source = req.query.source
+      ? normalizeAuctionSource(req.query.source)
+      : SOURCE_IAAI;
+    const st = getState(userId, source);
 
-    const row = await fetchUserBotSettings(userId);
+    const row = await fetchUserBotSettings(userId, source);
     const continuousEnabled = !!row?.bot_continuous;
     const filtersSet = hasAnyFiltersSet(row || null);
     const hasEmail = !!(row?.email && String(row.email).trim());
@@ -913,6 +1203,7 @@ router.get("/settings", authRequired, async (req, res) => {
 
     return res.json({
       ok: true,
+      source,
       bot: {
         continuousEnabled,
         filtersSet,
@@ -928,15 +1219,19 @@ router.get("/settings", authRequired, async (req, res) => {
 // POST /api/bot/run?mode=once|start|stop
 router.post("/run", authRequired, async (req, res) => {
   const mode = String(req.query.mode || "once");
+  const source = req.query.source
+    ? normalizeAuctionSource(req.query.source)
+    : SOURCE_IAAI;
   const userId = req.user.id;
-  const st = getState(userId);
+  const st = getState(userId, source);
 
   try {
     if (mode === "once") {
-      const r = await runOnceForUser(userId);
+      const r = await runOnceForUser(userId, source);
       return res.json({
         ok: true,
-        iaai: r.iaai,
+        source,
+        response: r.response,
         changesCount: r.changesCount,
         emailed: !!r.emailed,
         lastOutput: st.lastOutput,
@@ -944,31 +1239,31 @@ router.post("/run", authRequired, async (req, res) => {
     }
 
     if (mode === "start") {
-      // Persist preference so it can resume after deploy/restart
-      await setBotContinuous(userId, true);
+      await setBotContinuous(userId, true, source);
       st.continuousEnabled = true;
       st.lastContinuousAt = Date.now();
       st.lastStatusJson = null;
 
       const alreadyRunning = !!(st.running && st.timer);
-      await startContinuousForUser(userId);
+      await startContinuousForUser(userId, source);
 
       const pollMs = Number(process.env.BOT_POLL_MS || 10 * 60 * 1000);
       return res.json({
         ok: true,
-        iaai: st.lastIaaiResponse,
+        source,
+        response: st.lastResponse,
         pollMs,
         alreadyRunning,
       });
     }
 
     if (mode === "stop") {
-      await setBotContinuous(userId, false);
+      await setBotContinuous(userId, false, source);
       st.continuousEnabled = false;
       st.lastContinuousAt = Date.now();
       st.lastStatusJson = null;
-      stopContinuousForUser(userId);
-      return res.json({ ok: true });
+      stopContinuousForUser(userId, source);
+      return res.json({ ok: true, source });
     }
 
     return res
@@ -977,8 +1272,8 @@ router.post("/run", authRequired, async (req, res) => {
   } catch (e) {
     console.error("Bot run failed:", e);
     st.lastRunAt = Date.now();
-    st.lastOutput = `IAAI error: ${e?.message || "unknown error"}`;
-    st.lastIaaiResponse = {
+    st.lastOutput = `${source} error: ${e?.message || "unknown error"}`;
+    st.lastResponse = {
       status: null,
       contentType: "error",
       text: st.lastOutput,
@@ -1031,23 +1326,32 @@ router.resumeContinuousBots = async function resumeContinuousBots() {
   const pollMs = Number(process.env.BOT_POLL_MS || 10 * 60 * 1000);
 
   const r = await db.query(
-    "SELECT id FROM users WHERE bot_continuous = true ORDER BY id",
+    "SELECT id, bot_continuous, copart_bot_continuous FROM users WHERE bot_continuous = true OR copart_bot_continuous = true ORDER BY id",
   );
 
-  const userIds = r.rows.map((row) => row.id);
-  if (userIds.length === 0) return { resumed: 0, pollMs };
+  const rows = r.rows;
+  if (rows.length === 0) return { resumed: 0, pollMs };
 
   let resumed = 0;
-  for (const userId of userIds) {
-    try {
-      await startContinuousForUser(userId);
-      const st = getState(userId);
-      if (st.running && st.timer) resumed += 1;
-    } catch (e) {
-      console.error("Failed to resume bot for user", userId, e);
-      const st = getState(userId);
-      st.lastRunAt = Date.now();
-      st.lastOutput = `Resume failed: ${e?.message || "unknown error"}`;
+  for (const row of rows) {
+    const userId = row.id;
+    for (const source of SUPPORTED_SOURCES) {
+      const enabled =
+        source === SOURCE_COPART
+          ? row.copart_bot_continuous
+          : row.bot_continuous;
+      if (!enabled) continue;
+
+      try {
+        await startContinuousForUser(userId, source);
+        const st = getState(userId, source);
+        if (st.running && st.timer) resumed += 1;
+      } catch (e) {
+        console.error("Failed to resume bot for user", userId, source, e);
+        const st = getState(userId, source);
+        st.lastRunAt = Date.now();
+        st.lastOutput = `Resume failed: ${e?.message || "unknown error"}`;
+      }
     }
   }
 

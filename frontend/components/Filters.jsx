@@ -1,6 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { apiGet, apiPost } from "../src/api";
 
+const SOURCE_IAAI = "IAAI";
+const SOURCE_COPART = "COPART";
+
 const DEFAULT_YEAR_FROM = "1900";
 const DEFAULT_YEAR_TO = "2027";
 const DEFAULT_MIN_BID = "0";
@@ -73,11 +76,11 @@ function fromApiFilter(f) {
     auction_type: normalizeAuctionType(toInputValue(x.auction_type)),
     // Prefer new inventory_types array; fall back to legacy inventory_type.
     inventory_types: normalizeInventoryTypes(
-      Array.isArray(x.inventory_types) ? x.inventory_types : x.inventory_type
+      Array.isArray(x.inventory_types) ? x.inventory_types : x.inventory_type,
     ),
     // Prefer new fuel_types array; fall back to legacy fuel_type.
     fuel_types: normalizeFuelTypes(
-      Array.isArray(x.fuel_types) ? x.fuel_types : x.fuel_type
+      Array.isArray(x.fuel_types) ? x.fuel_types : x.fuel_type,
     ),
     min_bid: toInputValue(x.min_bid),
     max_bid: toInputValue(x.max_bid),
@@ -86,10 +89,11 @@ function fromApiFilter(f) {
   };
 }
 
-export default function Filters({ onTypeErrorsChange }) {
+export default function Filters({ source = SOURCE_IAAI, onTypeErrorsChange }) {
   const [form, setForm] = useState(empty);
   const [status, setStatus] = useState("");
   const [filtersSavedOpen, setFiltersSavedOpen] = useState(false);
+  const isCopart = source === SOURCE_COPART;
 
   // Inventory type and fuel type are optional.
   const hasTypeErrors = false;
@@ -105,7 +109,9 @@ export default function Filters({ onTypeErrorsChange }) {
 
     (async () => {
       setStatus("");
-      const r = await apiGet("/api/filters");
+      const r = await apiGet(
+        `/api/filters?source=${encodeURIComponent(source)}`,
+      );
       if (!mounted) return;
 
       if (r?.ok) {
@@ -118,7 +124,7 @@ export default function Filters({ onTypeErrorsChange }) {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [source]);
 
   const onChange = (e) => {
     const { name, value } = e.target;
@@ -170,7 +176,7 @@ export default function Filters({ onTypeErrorsChange }) {
   const onInventoryTypeToggle = (value, checked) => {
     setForm((p) => {
       const next = new Set(
-        Array.isArray(p.inventory_types) ? p.inventory_types : []
+        Array.isArray(p.inventory_types) ? p.inventory_types : [],
       );
       if (checked) next.add(value);
       else next.delete(value);
@@ -214,7 +220,10 @@ export default function Filters({ onTypeErrorsChange }) {
       odo_to: toNumberOrNull(odoToVal),
     };
 
-    const r = await apiPost("/api/filters", payload);
+    const r = await apiPost(
+      `/api/filters?source=${encodeURIComponent(source)}`,
+      payload,
+    );
     if (!r?.ok) {
       setStatus(r?.msg || "Failed to save filters");
       return;
@@ -258,7 +267,10 @@ export default function Filters({ onTypeErrorsChange }) {
       odo_to: toNumberOrNull(DEFAULT_ODO_TO),
     };
 
-    const r = await apiPost("/api/filters", payload);
+    const r = await apiPost(
+      `/api/filters?source=${encodeURIComponent(source)}`,
+      payload,
+    );
     if (!r?.ok) {
       setStatus(r?.msg || "Failed to reset filters");
       return;
@@ -270,7 +282,7 @@ export default function Filters({ onTypeErrorsChange }) {
 
   return (
     <div style={{ marginTop: 16 }}>
-      <h3>Filters</h3>
+      <h3>{source} filters</h3>
 
       {filtersSavedOpen && (
         <div
@@ -359,126 +371,116 @@ export default function Filters({ onTypeErrorsChange }) {
           </label>
         </div>
 
-        <div
-          style={{
-            display: "flex",
-            gap: 10,
-            flexWrap: "wrap",
-            alignItems: "flex-start",
-          }}
-        >
-          {/* <label style={{ display: "grid", gap: 4 }}>
-            <span>Auction type</span>
-            <select
-              name="auction_type"
-              value={form.auction_type}
-              onChange={onChange}
-            >
-              <option value="">(any)</option>
-              <option value="Buy Now">Buy Now</option>
-            </select>
-          </label> */}
+        {!isCopart && (
+          <div
+            style={{
+              display: "flex",
+              gap: 10,
+              flexWrap: "wrap",
+              alignItems: "flex-start",
+            }}
+          >
+            <label style={{ display: "grid", gap: 4 }}>
+              <span>Inventory type</span>
+              <details className="dropdown">
+                <summary className="dropdown-trigger">
+                  {form.inventory_types.length
+                    ? `${form.inventory_types.length} selected`
+                    : "(any)"}
+                </summary>
+                <div className="dropdown-panel">
+                  <label
+                    style={{ display: "flex", gap: 8, alignItems: "center" }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={form.inventory_types.includes("Automobiles")}
+                      onChange={(e) =>
+                        onInventoryTypeToggle("Automobiles", e.target.checked)
+                      }
+                    />
+                    <span>Automobiles</span>
+                  </label>
+                  <label
+                    style={{ display: "flex", gap: 8, alignItems: "center" }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={form.inventory_types.includes("Motorcycles")}
+                      onChange={(e) =>
+                        onInventoryTypeToggle("Motorcycles", e.target.checked)
+                      }
+                    />
+                    <span>Motorcycles</span>
+                  </label>
+                </div>
+              </details>
+            </label>
 
-          <label style={{ display: "grid", gap: 4 }}>
-            <span>Inventory type</span>
-            <details className="dropdown">
-              <summary className="dropdown-trigger">
-                {form.inventory_types.length
-                  ? `${form.inventory_types.length} selected`
-                  : "(any)"}
-              </summary>
-              <div className="dropdown-panel">
-                <label
-                  style={{ display: "flex", gap: 8, alignItems: "center" }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={form.inventory_types.includes("Automobiles")}
-                    onChange={(e) =>
-                      onInventoryTypeToggle("Automobiles", e.target.checked)
-                    }
-                  />
-                  <span>Automobiles</span>
-                </label>
-                <label
-                  style={{ display: "flex", gap: 8, alignItems: "center" }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={form.inventory_types.includes("Motorcycles")}
-                    onChange={(e) =>
-                      onInventoryTypeToggle("Motorcycles", e.target.checked)
-                    }
-                  />
-                  <span>Motorcycles</span>
-                </label>
-              </div>
-            </details>
-          </label>
-
-          <label style={{ display: "grid", gap: 4 }}>
-            <span>Fuel type</span>
-            <details className="dropdown">
-              <summary className="dropdown-trigger">
-                {form.fuel_types.length
-                  ? `${form.fuel_types.length} selected`
-                  : "(any)"}
-              </summary>
-              <div className="dropdown-panel">
-                <label
-                  style={{ display: "flex", gap: 8, alignItems: "center" }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={form.fuel_types.includes("Electric")}
-                    onChange={(e) =>
-                      onFuelTypeToggle("Electric", e.target.checked)
-                    }
-                  />
-                  <span>Electric</span>
-                </label>
-                <label
-                  style={{ display: "flex", gap: 8, alignItems: "center" }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={form.fuel_types.includes("Other")}
-                    onChange={(e) =>
-                      onFuelTypeToggle("Other", e.target.checked)
-                    }
-                  />
-                  <span>Other</span>
-                </label>
-              </div>
-            </details>
-          </label>
-        </div>
+            <label style={{ display: "grid", gap: 4 }}>
+              <span>Fuel type</span>
+              <details className="dropdown">
+                <summary className="dropdown-trigger">
+                  {form.fuel_types.length
+                    ? `${form.fuel_types.length} selected`
+                    : "(any)"}
+                </summary>
+                <div className="dropdown-panel">
+                  <label
+                    style={{ display: "flex", gap: 8, alignItems: "center" }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={form.fuel_types.includes("Electric")}
+                      onChange={(e) =>
+                        onFuelTypeToggle("Electric", e.target.checked)
+                      }
+                    />
+                    <span>Electric</span>
+                  </label>
+                  <label
+                    style={{ display: "flex", gap: 8, alignItems: "center" }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={form.fuel_types.includes("Other")}
+                      onChange={(e) =>
+                        onFuelTypeToggle("Other", e.target.checked)
+                      }
+                    />
+                    <span>Other</span>
+                  </label>
+                </div>
+              </details>
+            </label>
+          </div>
+        )}
 
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <label style={{ display: "grid", gap: 4 }}>
-            <span>Min bid</span>
-            <input
-              name="min_bid"
-              type="number"
-              min="0"
-              value={form.min_bid}
-              onChange={onChange}
-              onBlur={onBidBlur}
-            />
-          </label>
+            <label style={{ display: "grid", gap: 4 }}>
+              <span>{isCopart ? "Min BIN price" : "Min bid"}</span>
+              <input
+                name="min_bid"
+                type="number"
+                min="0"
+                value={form.min_bid}
+                onChange={onChange}
+                onBlur={onBidBlur}
+              />
+            </label>
 
-          <label style={{ display: "grid", gap: 4 }}>
-            <span>Max bid</span>
-            <input
-              name="max_bid"
-              type="number"
-              min="0"
-              value={form.max_bid}
-              onChange={onChange}
-              onBlur={onBidBlur}
-            />
-          </label>
-        </div>
+            <label style={{ display: "grid", gap: 4 }}>
+              <span>{isCopart ? "Max BIN price" : "Max bid"}</span>
+              <input
+                name="max_bid"
+                type="number"
+                min="0"
+                value={form.max_bid}
+                onChange={onChange}
+                onBlur={onBidBlur}
+              />
+            </label>
+          </div>
 
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <label style={{ display: "grid", gap: 4 }}>

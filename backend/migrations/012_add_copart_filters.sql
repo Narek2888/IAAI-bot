@@ -1,0 +1,15 @@
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS copart_filter_name TEXT,
+  ADD COLUMN IF NOT EXISTS copart_full_search TEXT,
+  ADD COLUMN IF NOT EXISTS copart_year_from INTEGER,
+  ADD COLUMN IF NOT EXISTS copart_year_to INTEGER,
+  ADD COLUMN IF NOT EXISTS copart_auction_type TEXT,
+  ADD COLUMN IF NOT EXISTS copart_inventory_type TEXT,
+  ADD COLUMN IF NOT EXISTS copart_inventory_types TEXT[],
+  ADD COLUMN IF NOT EXISTS copart_fuel_type TEXT,
+  ADD COLUMN IF NOT EXISTS copart_fuel_types TEXT[],
+  ADD COLUMN IF NOT EXISTS copart_min_bid INTEGER,
+  ADD COLUMN IF NOT EXISTS copart_max_bid INTEGER,
+  ADD COLUMN IF NOT EXISTS copart_odo_from INTEGER,
+  ADD COLUMN IF NOT EXISTS copart_odo_to INTEGER,
+  ADD COLUMN IF NOT EXISTS copart_bot_continuous BOOLEAN NOT NULL DEFAULT FALSE;

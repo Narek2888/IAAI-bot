@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { apiGet, apiPost } from "../src/api";
 
-export default function Bot({ disabled = false }) {
+export default function Bot({ source = "IAAI", disabled = false }) {
   const [bot, setBot] = useState({
     running: false,
     lastOutput: null,
@@ -26,8 +26,8 @@ export default function Bot({ disabled = false }) {
     inFlightRef.current = true;
     try {
       const [settings, status] = await Promise.all([
-        apiGet("/api/bot/settings"),
-        apiGet("/api/bot/status"),
+        apiGet(`/api/bot/settings?source=${encodeURIComponent(source)}`),
+        apiGet(`/api/bot/status?source=${encodeURIComponent(source)}`),
       ]);
 
       setBot((prev) => ({
@@ -38,7 +38,7 @@ export default function Bot({ disabled = false }) {
     } finally {
       inFlightRef.current = false;
     }
-  }, []);
+  }, [source]);
 
   // One-time fetch on mount
   useEffect(() => {
@@ -98,7 +98,9 @@ export default function Bot({ disabled = false }) {
     const startedAt = Date.now();
 
     try {
-      const r = await apiPost("/api/bot/run?mode=once");
+      const r = await apiPost(
+        `/api/bot/run?mode=once&source=${encodeURIComponent(source)}`,
+      );
       if (!r?.ok) {
         setRunOnceSuccessOpen(false);
         setRunOnceLoading(false);
@@ -116,7 +118,7 @@ export default function Bot({ disabled = false }) {
       if (r?.lastOutput) setRunOnceLastOutput(String(r.lastOutput));
 
       try {
-        const settings = await apiGet("/api/bot/settings");
+        const settings = await apiGet(`/api/bot/settings?source=${encodeURIComponent(source)}`);
         const hasEmail = !!(settings?.ok && settings?.bot?.hasEmail);
         setRunOnceHasEmail(hasEmail);
       } catch {
@@ -137,13 +139,17 @@ export default function Bot({ disabled = false }) {
   };
 
   const start = async () => {
-    const r = await apiPost("/api/bot/run?mode=start");
+    const r = await apiPost(
+      `/api/bot/run?mode=start&source=${encodeURIComponent(source)}`,
+    );
     if (!r?.ok) return alert(r?.msg || "Failed");
     await refresh();
   };
 
   const stop = async () => {
-    const r = await apiPost("/api/bot/run?mode=stop");
+    const r = await apiPost(
+      `/api/bot/run?mode=stop&source=${encodeURIComponent(source)}`,
+    );
     if (!r?.ok) return alert(r?.msg || "Failed");
     await refresh();
   };

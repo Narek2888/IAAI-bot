@@ -1,6 +1,7 @@
 const sgMail = require("@sendgrid/mail");
 
 const BASE_URL = process.env.IAAI_BASE_URL || "https://www.iaai.com";
+const SOURCE_COPART = "COPART";
 
 function getAppBaseUrl() {
   const candidates = [
@@ -85,21 +86,35 @@ function isValidVisResizerImage(u) {
   return /^\d{6,}$/.test(key);
 }
 
+function normalizeImageValue(imageValue) {
+  if (!imageValue) return null;
+  const raw = String(imageValue).trim();
+  if (!raw) return null;
+  if (raw.toLowerCase().includes("<img")) return raw;
+  if (
+    raw.startsWith("http://") ||
+    raw.startsWith("https://") ||
+    raw.startsWith("//") ||
+    raw.startsWith("/")
+  ) {
+    return raw;
+  }
+  return null;
+}
+
 function normalizeVehicle(v) {
   const rawLink = pick(v, ["vehicle_link", "link", "url", "href"]);
   const candidateLink = rawLink ? absolutizeUrl(rawLink) : "";
-  const vehicle_link = extractVehicleIdFromVehicleDetailUrl(candidateLink)
-    ? candidateLink
-    : "";
+  const vehicle_link = candidateLink || "";
 
   const title = pick(v, ["title", "name", "vehicle", "vehicle_title"]);
   const stock_id = pick(v, ["stock_id", "stockId", "stock", "stock_number"]);
   const price = pick(v, ["price", "current_bid", "bid", "buy_now"]);
-  const image = pick(v, ["image", "image_url", "imageUrl", "img", "photo"]);
+  const image = normalizeImageValue(
+    pick(v, ["image", "image_url", "imageUrl", "img", "photo"]),
+  );
 
-  const safeImage = isValidVisResizerImage(image) ? image : null;
-
-  return { vehicle_link, title, stock_id, price, image: safeImage };
+  return { vehicle_link, title, stock_id, price, image };
 }
 
 function buildImageHtml(imageValue) {
@@ -140,13 +155,12 @@ function buildImageHtml(imageValue) {
   const absUrl = absolutizeUrl(raw);
   if (!absUrl) return "";
 
-  return `<img src="${esc(
-    absUrl,
-  )}" style="max-width:400px;height:auto;display:block;" width="400" />`;
+  return `<img src="${esc(absUrl)}" alt="Vehicle photo" border="0" style="max-width:400px;width:100%;height:auto;display:block;border:0;" />`;
 }
 
-function vehiclesToHtml(vehicles) {
+function vehiclesToHtml(vehicles, source = "IAAI") {
   const normalized = (vehicles || []).map(normalizeVehicle);
+  const title = source === SOURCE_COPART ? "Copart Updates" : "IAAI Updates";
 
   const items = normalized
     .map((v) => {
@@ -180,7 +194,7 @@ function vehiclesToHtml(vehicles) {
 
   return `
     <div style="font-family: Arial, sans-serif;">
-      <h3 style="margin:0 0 8px 0;">IAAI Updates</h3>
+      <h3 style="margin:0 0 8px 0;">${esc(title)}</h3>
       <div style="margin:0 0 12px 0;">Found ${
         (vehicles || []).length
       } update(s).</div>
@@ -208,13 +222,19 @@ function unsubscribeFooterHtml(unsubscribeUrl) {
   `;
 }
 
-async function sendVehiclesEmail({ to, subject, vehicles, unsubscribeUrl }) {
+async function sendVehiclesEmail({
+  to,
+  subject,
+  vehicles,
+  unsubscribeUrl,
+  source,
+}) {
   const apiKey = requireEnv("SENDGRID_API_KEY");
   const from = requireEnv("SENDGRID_FROM");
 
   sgMail.setApiKey(apiKey);
 
-  const htmlBody = `${vehiclesToHtml(vehicles)}${unsubscribeFooterHtml(
+  const htmlBody = `${vehiclesToHtml(vehicles, source)}${unsubscribeFooterHtml(
     unsubscribeUrl,
   )}`;
 

@@ -6,6 +6,10 @@ import { apiGet, apiPost, loadTokenFromStorage, setAuthToken } from "./api";
 
 const USER_KEY = "user";
 const DISMISSED_VERSION_KEY = "dismissedServerVersion";
+const AUCTION_SOURCE_KEY = "auctionSource";
+
+const SOURCE_IAAI = "IAAI";
+const SOURCE_COPART = "COPART";
 
 const APP_VERSION =
   typeof __GIT_SHA__ !== "undefined" && __GIT_SHA__ ? __GIT_SHA__ : "0000000";
@@ -99,6 +103,15 @@ export default function App() {
 
   const [updateOpen, setUpdateOpen] = useState(false);
   const [serverVersion, setServerVersion] = useState(null);
+  const [source, setSource] = useState(() => {
+    try {
+      const stored = localStorage.getItem(AUCTION_SOURCE_KEY);
+      if (stored === SOURCE_COPART) return SOURCE_COPART;
+    } catch {
+      // ignore
+    }
+    return SOURCE_IAAI;
+  });
   const resumeAttemptedRef = useRef(false);
 
   useEffect(() => {
@@ -113,6 +126,14 @@ export default function App() {
     if (!user) resumeAttemptedRef.current = false;
   }, [user]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(AUCTION_SOURCE_KEY, source);
+    } catch {
+      // ignore
+    }
+  }, [source]);
+
   // After a backend deploy, bots are not auto-resumed by default.
   // Once this client is on the latest version, resume the user's bot (if enabled)
   // exactly once per page load.
@@ -126,10 +147,12 @@ export default function App() {
     if (resumeAttemptedRef.current) return;
 
     resumeAttemptedRef.current = true;
-    apiPost("/api/bot/resume", {}).catch(() => {
-      // ignore
-    });
-  }, [user, serverVersion, updateOpen]);
+    apiPost(`/api/bot/resume?source=${encodeURIComponent(source)}`, {}).catch(
+      () => {
+        // ignore
+      },
+    );
+  }, [user, serverVersion, updateOpen, source]);
 
   // Detect a newly deployed app version and ask the user to refresh.
   // We intentionally do NOT force-refresh; the user chooses when to upgrade.
@@ -223,7 +246,7 @@ export default function App() {
     // Resume bot only when user accepts the new version.
     // (Backend is configured to NOT auto-resume bots on deploy by default.)
     try {
-      await apiPost("/api/bot/resume", {});
+      await apiPost(`/api/bot/resume?source=${encodeURIComponent(source)}`, {});
     } catch {
       // ignore
     }
@@ -1517,8 +1540,37 @@ export default function App() {
           </div>
         )}
 
-        <Filters onTypeErrorsChange={setHasTypeErrors} />
-        <Bot disabled={hasTypeErrors} />
+        <div
+          style={{
+            display: "flex",
+            gap: 8,
+            flexWrap: "wrap",
+            marginTop: 16,
+            marginBottom: 16,
+            alignItems: "center",
+          }}
+        >
+          <button
+            type="button"
+            className={source === SOURCE_IAAI ? "primary" : "secondary"}
+            onClick={() => setSource(SOURCE_IAAI)}
+          >
+            IAAI
+          </button>
+          <button
+            type="button"
+            className={source === SOURCE_COPART ? "primary" : "secondary"}
+            onClick={() => setSource(SOURCE_COPART)}
+          >
+            Copart
+          </button>
+          <div style={{ color: "#6b7280", fontSize: 14 }}>
+            Current auction source: <strong>{source}</strong>
+          </div>
+        </div>
+
+        <Filters source={source} onTypeErrorsChange={setHasTypeErrors} />
+        <Bot source={source} disabled={hasTypeErrors} />
       </div>
       {renderUpdateModal()}
       <VersionRow version={APP_VERSION} />
