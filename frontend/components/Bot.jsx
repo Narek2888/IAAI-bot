@@ -236,7 +236,7 @@ export default function Bot({ source = "IAAI", disabled = false }) {
               </div>
             ) : (runOnceChangesCount ?? 0) <= 0 ? (
               <div style={{ marginBottom: 12 }}>
-                There are no updates. Change filters for new data.
+                No updates matched your current filters.
               </div>
             ) : runOnceHasEmail ? (
               <div style={{ marginBottom: 12 }}>
@@ -250,6 +250,11 @@ export default function Bot({ source = "IAAI", disabled = false }) {
               <div style={{ marginBottom: 12 }}>
                 Updates were found, but your email is not configured. Please set
                 your email in Manage account.
+              </div>
+            )}
+            {!runOnceLoading && runOnceLastOutput && (
+              <div style={{ marginBottom: 12, padding: "8px 10px", background: "#f3f4f6", borderRadius: 6, fontSize: 11, color: "#374151", fontFamily: "monospace", wordBreak: "break-all", lineHeight: 1.5 }}>
+                {runOnceLastOutput}
               </div>
             )}
 

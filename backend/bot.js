@@ -7,13 +7,13 @@ const crypto = require("crypto"); // ADD
 const db = require("./db");
 const { authRequired } = require("./authMiddleware");
 const { extractVehiclesFromHtml } = require("./scrapeIaai");
-const { sendVehiclesEmail, sendTestEmail } = require("./mailer");
+const { sendVehiclesEmail, sendTestEmail, sendErrorEmail } = require("./mailer");
 
 const router = express.Router();
 
 const BASE_URL = "https://www.iaai.com";
 const makeIaaiApiUrl = () => `${BASE_URL}/Search?c=${Date.now()}`;
-const COPART_API_URL = "https://www.copart.com/public/lots/search";
+const COPART_API_URL = "https://www.copart.com/public/lots/search-results";
 
 const IAAI_HEADERS = {
   "User-Agent":
@@ -26,13 +26,20 @@ const IAAI_HEADERS = {
   "X-Requested-With": "XMLHttpRequest",
 };
 
-const COPART_HEADERS = {
-  "User-Agent": IAAI_HEADERS["User-Agent"],
-  Accept: "application/json, text/plain, */*",
-  "Content-Type": "application/json",
-  Origin: "https://www.copart.com",
-  Referer: "https://www.copart.com/lotSearchResults",
-};
+async function buildCopartHeaders() {
+  const { getCopartSession } = require("./copartCookies");
+  const h = {
+    "User-Agent": IAAI_HEADERS["User-Agent"],
+    Accept: "application/json, text/plain, */*",
+    "Content-Type": "application/json",
+    Origin: "https://www.copart.com",
+    Referer: "https://www.copart.com/lotSearchResults",
+  };
+  const session = await getCopartSession();
+  if (session.cookieString) h["Cookie"] = session.cookieString;
+  if (session.xsrfToken) h["X-XSRF-TOKEN"] = session.xsrfToken;
+  return h;
+}
 
 const SOURCE_IAAI = "IAAI";
 const SOURCE_COPART = "COPART";
@@ -318,17 +325,17 @@ function parseOdometerToNumber(odometer) {
   return Number.isFinite(n) ? n : null;
 }
 
-function filterVehiclesByBidRange(vehicles, u) {
+function filterVehiclesByBidRange(vehicles, u, requirePrice = false) {
   const min = toNumberOrNull(u?.min_bid);
   const max = toNumberOrNull(u?.max_bid);
 
-  if (min === null && max === null) return vehicles || [];
+  if (min === null && max === null && !requirePrice) return vehicles || [];
 
   return (vehicles || []).filter((v) => {
     const p = parsePriceToNumber(v?.price);
-    // If price is missing/unparseable in the scraped HTML, don't drop the item.
-    // The IAAI Search payload already applies server-side filtering.
-    if (p === null) return true;
+    // For Copart: always drop vehicles with no price (requirePrice=true).
+    // For IAAI: pass through — server-side filtering already handled it.
+    if (p === null) return !requirePrice;
     if (min !== null && p < min) return false;
     if (max !== null && p > max) return false;
     return true;
@@ -522,18 +529,12 @@ function buildIaaiPayloadFromUserFilters(u) {
 }
 
 function buildCopartPayloadFromUserFilters(u) {
-  const minBid = toNumberOrNull(u.min_bid);
-  const maxBid = toNumberOrNull(u.max_bid);
+  const filter = {};
 
-  // Filter directly on bnp (buy now price) — a numeric field in the Solr index.
-  // This both restricts to BIN-only lots (bnp >= 1) and applies price range
-  // server-side. buy_it_now_code:B1 is ignored by the public endpoint.
-  const binFrom = minBid !== null ? minBid : 1;
-  const binTo = maxBid !== null ? maxBid : "*";
-
-  const filter = {
-    FETI: [`bnp:[${binFrom} TO ${binTo}]`],
-  };
+  // Only request Buy It Now lots when user explicitly set auction_type = "Buy Now"
+  if (u.auction_type === "Buy Now") {
+    filter.FETI = ["buy_it_now_code:B1"];
+  }
 
   const yearFrom = toNumberOrNull(u.year_from);
   const yearTo = toNumberOrNull(u.year_to);
@@ -551,24 +552,19 @@ function buildCopartPayloadFromUserFilters(u) {
     ];
   }
 
-  const includeTagByField = { FETI: "{!tag=FETI}" };
-  if (filter.ODM) includeTagByField.ODM = "{!tag=ODM} ";
-  if (filter.YEAR) includeTagByField.YEAR = "{!tag=YEAR}";
-
   const searchQuery = String(u.full_search || "").trim();
 
   return {
     query: searchQuery ? [searchQuery] : ["*"],
     filter,
     sort: [
-      "bnp asc",
       "salelight_priority asc",
       "member_damage_group_priority asc",
       "auction_date_type desc",
       "auction_date_utc asc",
     ],
     page: 0,
-    size: 100,
+    size: 20,
     start: 0,
     watchListOnly: false,
     freeFormSearch: true,
@@ -578,7 +574,10 @@ function buildCopartPayloadFromUserFilters(u) {
     displayName: "",
     searchName: "",
     backUrl: "",
-    includeTagByField,
+    includeTagByField: {
+      ...(odoFrom !== null || odoTo !== null ? { ODM: "{!tag=ODM} " } : {}),
+      ...(yearFrom !== null || yearTo !== null ? { YEAR: "{!tag=YEAR}" } : {}),
+    },
     rawParams: {},
   };
 }
@@ -602,8 +601,10 @@ function extractVehiclesFromCopartResponse(resp, maxItems = 500) {
     }
   }
 
-  const content = json?.data?.results?.content;
-  if (!Array.isArray(content)) return [];
+  const results = json?.data?.results;
+  const totalElements = results?.totalElements ?? null;
+  const content = results?.content;
+  if (!Array.isArray(content)) return { vehicles: [], totalElements };
 
   const vehicles = [];
   for (const item of content) {
@@ -611,8 +612,13 @@ function extractVehiclesFromCopartResponse(resp, maxItems = 500) {
     const stockId = String(
       item.ln || item.lotNumberStr || item.lotNumber || "",
     ).trim();
-    // bnp = Buy It Now price; hb = highest bid. Use ?? so 0 is a valid price.
-    const rawPrice = item.bnp ?? (item.hb > 0 ? item.hb : null);
+    // bnp = static BIN price; dynamicLotDetails.buyTodayBid = live BIN price (fallback)
+    // Never fall back to hb (regular auction bid) — that's not a Buy It Now price
+    const buyTodayBid = item.dynamicLotDetails?.buyTodayBid;
+    const rawPrice = Number(item.bnp) > 0 ? item.bnp
+      : Number(buyTodayBid) > 0 ? buyTodayBid
+      : null;
+    const buy_it_now = rawPrice !== null;
     const price = rawPrice != null ? String(rawPrice) : null;
     const link = buildCopartLotLink(item);
     // tims = thumbnail image source (full CDN URL); lh is a hash, not a URL
@@ -621,17 +627,6 @@ function extractVehiclesFromCopartResponse(resp, maxItems = 500) {
     // lcy = lot calendar year; orr = odometer reading received
     const year = item.lcy != null ? item.lcy : null;
     const odometer = item.orr != null ? item.orr : null;
-    // bnp = Buy It Now price; positive value confirms BIN lot
-    const buy_it_now = item.bnp != null && Number(item.bnp) > 0;
-
-    if (vehicles.length === 0) {
-      // Log first item fields to help diagnose image/BIN issues
-      console.log("[copart-debug] first item fields:", {
-        ln: item.ln, bnp: item.bnp, bndc: item.bndc,
-        tims: item.tims, lh: item.lh, iuq: item.iuq,
-        lcy: item.lcy, orr: item.orr,
-      });
-    }
 
     vehicles.push({
       stock_id: stockId || null,
@@ -648,7 +643,7 @@ function extractVehiclesFromCopartResponse(resp, maxItems = 500) {
     if (vehicles.length >= maxItems) break;
   }
 
-  return vehicles;
+  return { vehicles, totalElements };
 }
 
 async function fetchUserFilters(userId, source = SOURCE_IAAI) {
@@ -825,20 +820,30 @@ async function fetchVehiclesPaged({
   addMany(p1);
 
   let pagesFetched = 1;
+  let pagedTimedOut = false;
   for (let page = 2; page <= maxPages; page += 1) {
     if (uniq.size >= maxVehicles) break;
 
     const url = makeIaaiApiUrl();
     const payload = { ...basePayload, CurrentPage: page };
 
-    const resp = await axios.post(url, payload, {
-      headers: IAAI_HEADERS,
-      timeout: 20000,
-      validateStatus: () => true,
-      responseType: "text",
-      maxContentLength: Infinity,
-      maxBodyLength: Infinity,
-    });
+    let resp;
+    try {
+      resp = await axios.post(url, payload, {
+        headers: IAAI_HEADERS,
+        timeout: 10000,
+        validateStatus: () => true,
+        responseType: "text",
+        maxContentLength: Infinity,
+        maxBodyLength: Infinity,
+      });
+    } catch (e) {
+      if (e.code === "ECONNABORTED" || e.code === "ETIMEDOUT") {
+        pagedTimedOut = true;
+        break;
+      }
+      throw e;
+    }
 
     const contentType = resp?.headers?.["content-type"] || "";
     const isHtml =
@@ -856,6 +861,7 @@ async function fetchVehiclesPaged({
   return {
     vehicles: Array.from(uniq.values()).slice(0, maxVehicles),
     pagesFetched,
+    timedOut: pagedTimedOut,
   };
 }
 
@@ -864,6 +870,16 @@ async function runOnceForUser(userId, source = SOURCE_IAAI) {
 
   let changesCount = 0;
   let emailed = false;
+
+  if (source === SOURCE_COPART) {
+    const { ensureSession } = require("./copartScraper");
+    if (!st.lastOutput || st.lastOutput.includes("warming")) {
+      st.lastOutput = `${source} warming up session...`;
+    }
+    await ensureSession().catch((e) =>
+      console.error("[copart-scraper] pre-run warm failed:", e.message),
+    );
+  }
 
   if (st.pendingLastSeenReset) {
     st.pendingLastSeenReset = false;
@@ -892,49 +908,114 @@ async function runOnceForUser(userId, source = SOURCE_IAAI) {
     let headers;
     if (source === SOURCE_COPART) {
       payload = buildCopartPayloadFromUserFilters(u || {});
-      url = COPART_API_URL;
-      headers = COPART_HEADERS;
     } else {
       payload = buildIaaiPayloadFromUserFilters(u || {});
       url = makeIaaiApiUrl();
       headers = IAAI_HEADERS;
     }
 
-    st.lastRequest = { url, payload };
+    st.lastRequest = { url: source === SOURCE_COPART ? COPART_API_URL : url, payload };
 
-    const resp = await axios.post(url, payload, {
-      headers,
-      timeout: 20000,
-      validateStatus: () => true,
-      responseType: "text",
-      maxContentLength: Infinity,
-      maxBodyLength: Infinity,
-    });
+    let resp;
+    let vehicles = [];
 
-    st.lastRunAt = Date.now();
-    st.lastOutput = summarizeResponse(resp, source);
-    st.lastResponse = extractResponseData(resp);
+    if (source === SOURCE_COPART) {
+      const { searchCopart, invalidateCopartSession } = require("./copartScraper");
+      const maxCopartVehicles = Math.max(1, Number(process.env.COPART_MAX_VEHICLES || 100));
+
+      let json;
+      try {
+        json = await searchCopart(payload);
+      } catch (e) {
+        st.lastRunAt = Date.now();
+        st.lastOutput = `${source} search failed: ${e.message}`;
+        return { response: st.lastResponse, changesCount: 0, emailed: false };
+      }
+
+      if (json?.error) {
+        invalidateCopartSession();
+        st.lastRunAt = Date.now();
+        st.lastOutput = `${source} session rejected (HTTP ${json.error}) — will retry next poll`;
+        return { response: st.lastResponse, changesCount: 0, emailed: false };
+      }
+
+      if (String(process.env.DEBUG_COPART_JSON || "") === "1") {
+        try {
+          const outPath = path.join(process.cwd(), "copart-response.json");
+          fs.writeFileSync(outPath, JSON.stringify(json, null, 2), "utf8");
+        } catch { /* ignore */ }
+      }
+
+      // Wrap in axios-like shape for extractVehiclesFromCopartResponse
+      const fakeResp = { data: json };
+      const copartResult = extractVehiclesFromCopartResponse(fakeResp, maxCopartVehicles);
+      vehicles = copartResult.vehicles;
+      const totalElements = copartResult.totalElements;
+
+      // Paginate if more vehicles are needed
+      const uniqCopart = new Map();
+      for (const v of vehicles) {
+        const k = vehicleUniqKey(v);
+        if (k) uniqCopart.set(k, v);
+      }
+      let copartPage = 1;
+      while (uniqCopart.size < maxCopartVehicles && uniqCopart.size < (totalElements ?? 0)) {
+        let nextJson;
+        try {
+          nextJson = await searchCopart({ ...payload, page: copartPage });
+        } catch {
+          break;
+        }
+        const nextResult = extractVehiclesFromCopartResponse({ data: nextJson }, maxCopartVehicles);
+        if (!nextResult.vehicles.length) break;
+        for (const v of nextResult.vehicles) {
+          const k = vehicleUniqKey(v);
+          if (k && !uniqCopart.has(k)) uniqCopart.set(k, v);
+          if (uniqCopart.size >= maxCopartVehicles) break;
+        }
+        copartPage += 1;
+      }
+      vehicles = [...uniqCopart.values()];
+
+      st.lastRunAt = Date.now();
+      st.lastCount = vehicles.length;
+      st.lastOutput = `${source} | API total: ${totalElements ?? "?"} | extracted: ${vehicles.length}`;
+      st.lastResponse = { status: 200, contentType: "application/json", json };
+    } else {
+      try {
+        resp = await axios.post(url, payload, {
+          headers,
+          timeout: 10000,
+          validateStatus: () => true,
+          responseType: "text",
+          maxContentLength: Infinity,
+          maxBodyLength: Infinity,
+        });
+      } catch (e) {
+        if (e.code === "ECONNABORTED" || e.code === "ETIMEDOUT") {
+          const msg = `The ${source} bot request timed out after 10 seconds. The auction server may be slow or unreachable. The bot will retry on the next scheduled poll.`;
+          st.lastRunAt = Date.now();
+          st.lastOutput = `${source} request timed out`;
+          try {
+            const userRow = await db.query("SELECT email FROM users WHERE id = $1", [userId]);
+            const email = userRow.rows[0]?.email;
+            if (email) await sendErrorEmail({ to: email, subject: `${source} bot: request timed out`, message: msg });
+          } catch { /* ignore email failure */ }
+          return { response: st.lastResponse, changesCount: 0, emailed: false };
+        }
+        throw e;
+      }
+
+      st.lastRunAt = Date.now();
+      st.lastOutput = "";
+      st.lastResponse = extractResponseData(resp);
+    }
 
     const contentType = resp?.headers?.["content-type"] || "";
     const isHtml =
       typeof resp?.data === "string" && contentType.includes("text/html");
 
-    let vehicles = [];
-    if (source === SOURCE_COPART) {
-      if (String(process.env.DEBUG_COPART_JSON || "") === "1") {
-        try {
-          const outPath = path.join(process.cwd(), "copart-response.json");
-          const body = typeof resp.data === "string" ? resp.data : JSON.stringify(resp.data, null, 2);
-          fs.writeFileSync(outPath, body, "utf8");
-          st.lastOutput += ` | saved copart json -> ${outPath}`;
-        } catch (e) {
-          st.lastOutput += ` | failed to save copart json: ${e?.message}`;
-        }
-      }
-      vehicles = extractVehiclesFromCopartResponse(resp);
-      st.lastCount = vehicles.length;
-      st.lastOutput += ` | vehicles ${vehicles.length}`;
-    } else if (isHtml) {
+    if (source !== SOURCE_COPART && isHtml) {
       if (String(process.env.DEBUG_IAAI_HTML || "") === "1") {
         const outPath = path.join(process.cwd(), "iaai-response.html");
         fs.writeFileSync(outPath, resp.data, "utf8");
@@ -959,11 +1040,27 @@ async function runOnceForUser(userId, source = SOURCE_IAAI) {
       if (maxPages > 1) {
         st.lastOutput += ` | pages ${paged.pagesFetched}/${maxPages} | vehicles ${vehicles.length}`;
       }
+      if (paged.timedOut) {
+        st.lastOutput += ` | pagination timed out (partial results)`;
+        try {
+          const userRow = await db.query("SELECT email FROM users WHERE id = $1", [userId]);
+          const email = userRow.rows[0]?.email;
+          if (email) {
+            await sendErrorEmail({
+              to: email,
+              subject: `${source} bot: pagination timed out`,
+              message: `The ${source} bot fetched ${vehicles.length} vehicles before a page request timed out (10s limit). Results are partial. The bot will retry on the next scheduled poll.`,
+            });
+          }
+        } catch { /* ignore email failure */ }
+      }
     }
 
+    const prevSeenSize = Object.keys(st.lastSeen || {}).length;
     const { changes, nextSeen } = diffVehicles(st.lastSeen || {}, vehicles);
     st.lastSeen = nextSeen;
     await saveLastSeen(userId, nextSeen, source);
+    console.log(`[bot-debug] ${source} user=${userId} prevSeen=${prevSeenSize} vehicles=${vehicles.length} changes=${changes.length}`);
 
     // For Copart: BIN-only first, then price range on BIN price, then odo/year.
     // For IAAI: bid range, then odo.
@@ -974,17 +1071,22 @@ async function runOnceForUser(userId, source = SOURCE_IAAI) {
     let droppedByBin = 0;
 
     if (source === SOURCE_COPART) {
-      const afterBin = filterVehiclesByBuyItNow(changes);
-      droppedByBin = changes.length - afterBin.length;
-
-      const afterBid = filterVehiclesByBidRange(afterBin, u || {});
-      droppedByBidRange = afterBin.length - afterBid.length;
+      // requirePrice=true: always drop Copart vehicles with no price (bnp=0, hb=0)
+      const afterBid = filterVehiclesByBidRange(changes, u || {}, true);
+      droppedByBidRange = changes.length - afterBid.length;
 
       const afterOdo = filterVehiclesByOdoRange(afterBid, u || {});
       droppedByOdoRange = afterBid.length - afterOdo.length;
 
       filteredChanges = filterVehiclesByYearRange(afterOdo, u || {});
       droppedByYearRange = afterOdo.length - filteredChanges.length;
+
+      // Only enforce BIN client-side when user explicitly chose "Buy Now"
+      if (u?.auction_type === "Buy Now") {
+        const afterBin = filterVehiclesByBuyItNow(filteredChanges);
+        droppedByBin = filteredChanges.length - afterBin.length;
+        filteredChanges = afterBin;
+      }
     } else {
       const afterBid = filterVehiclesByBidRange(changes, u || {});
       droppedByBidRange = changes.length - afterBid.length;
@@ -994,6 +1096,7 @@ async function runOnceForUser(userId, source = SOURCE_IAAI) {
     }
 
     changesCount = filteredChanges.length;
+    console.log(`[bot-debug] ${source} user=${userId} filteredChanges=${filteredChanges.length} droppedBid=${droppedByBidRange} droppedOdo=${droppedByOdoRange} droppedYear=${droppedByYearRange} filters=${JSON.stringify({ min_bid: u?.min_bid, max_bid: u?.max_bid, odo_from: u?.odo_from, odo_to: u?.odo_to, year_from: u?.year_from, year_to: u?.year_to })}`);
 
     if (droppedByBidRange > 0) {
       st.lastOutput += ` | dropped ${droppedByBidRange} out-of-bid-range update(s)`;
@@ -1052,10 +1155,22 @@ async function runOnceForUser(userId, source = SOURCE_IAAI) {
             token,
           )}`;
 
+          let vehiclesForEmail = filteredChanges;
+          if (source === SOURCE_COPART) {
+            const { fetchCopartImageAsDataUri } = require("./copartScraper");
+            vehiclesForEmail = await Promise.all(
+              filteredChanges.map(async (v) => {
+                if (!v.image) return v;
+                const dataUri = await fetchCopartImageAsDataUri(v.image).catch(() => null);
+                return dataUri ? { ...v, image: dataUri } : v;
+              }),
+            );
+          }
+
           await sendVehiclesEmail({
             to: user.email,
             subject: `${source} updates for ${user.username} (${filteredChanges.length})`,
-            vehicles: filteredChanges,
+            vehicles: vehiclesForEmail,
             unsubscribeUrl,
             source,
           });
@@ -1331,6 +1446,14 @@ router.resumeContinuousBots = async function resumeContinuousBots() {
 
   const rows = r.rows;
   if (rows.length === 0) return { resumed: 0, pollMs };
+
+  // If any user has Copart bot enabled, pre-warm cookies now so the first poll is instant
+  if (rows.some((row) => row.copart_bot_continuous)) {
+    const { ensureSession } = require("./copartScraper");
+    ensureSession().catch((e) =>
+      console.error("[copart-scraper] startup pre-warm failed:", e.message),
+    );
+  }
 
   let resumed = 0;
   for (const row of rows) {

@@ -95,7 +95,8 @@ function normalizeImageValue(imageValue) {
     raw.startsWith("http://") ||
     raw.startsWith("https://") ||
     raw.startsWith("//") ||
-    raw.startsWith("/")
+    raw.startsWith("/") ||
+    raw.startsWith("data:")
   ) {
     return raw;
   }
@@ -151,7 +152,12 @@ function buildImageHtml(imageValue) {
     return html;
   }
 
-  // Case B: scraper provided a plain image URL
+  // Case B: data URI — use directly, no absolutizing
+  if (raw.startsWith("data:")) {
+    return `<img src="${raw}" alt="Vehicle photo" border="0" style="max-width:400px;width:100%;height:auto;display:block;border:0;" />`;
+  }
+
+  // Case C: plain URL
   const absUrl = absolutizeUrl(raw);
   if (!absUrl) return "";
 
@@ -337,4 +343,23 @@ async function sendOtpEmail({ to, otp }) {
   });
 }
 
-module.exports = { sendVehiclesEmail, sendOtpEmail, sendTestEmail };
+async function sendErrorEmail({ to, subject, message }) {
+  const apiKey = requireEnv("SENDGRID_API_KEY");
+  const from = requireEnv("SENDGRID_FROM");
+
+  sgMail.setApiKey(apiKey);
+
+  const safeMsg = esc(message || "An unexpected error occurred.");
+  const html = `
+    <div style="font-family: Arial, sans-serif;">
+      <h3 style="margin:0 0 10px 0; color:#dc2626;">⚠ Bot Error</h3>
+      <p style="margin:0 0 10px 0;">${safeMsg}</p>
+      <p style="margin:0; color:#6b7280; font-size: 12px;">Time: ${esc(new Date().toISOString())}</p>
+    </div>
+  `;
+
+  const [resp] = await sgMail.send({ to, from, subject: subject || "Bot error", html });
+  return { statusCode: resp?.statusCode ?? null };
+}
+
+module.exports = { sendVehiclesEmail, sendOtpEmail, sendTestEmail, sendErrorEmail };

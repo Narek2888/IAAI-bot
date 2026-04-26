@@ -95,6 +95,7 @@ export default function Filters({ source = SOURCE_IAAI, onTypeErrorsChange }) {
   const [filtersSavedOpen, setFiltersSavedOpen] = useState(false);
   const isCopart = source === SOURCE_COPART;
 
+
   // Inventory type and fuel type are optional.
   const hasTypeErrors = false;
 
@@ -343,7 +344,7 @@ export default function Filters({ source = SOURCE_IAAI, onTypeErrorsChange }) {
           onChange={onChange}
         />
 
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
           <label style={{ display: "grid", gap: 4 }}>
             <span>Year from</span>
             <input
@@ -369,6 +370,19 @@ export default function Filters({ source = SOURCE_IAAI, onTypeErrorsChange }) {
               onBlur={onYearBlur}
             />
           </label>
+
+          {isCopart && (
+            <label style={{ display: "flex", gap: 8, alignItems: "center", cursor: "pointer", paddingBottom: 6, whiteSpace: "nowrap" }}>
+              <input
+                type="checkbox"
+                checked={form.auction_type === "Buy Now"}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, auction_type: e.target.checked ? "Buy Now" : "" }))
+                }
+              />
+              <span>Buy Now only</span>
+            </label>
+          )}
         </div>
 
         {!isCopart && (
