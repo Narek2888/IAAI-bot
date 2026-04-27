@@ -119,22 +119,14 @@ app.use("/api", (req, res) => {
 async function start() {
   await migrate();
 
-  // IMPORTANT:
-  // Do not auto-resume bots on deploy by default. This avoids restarting
-  // everyone at the same time when a new version is deployed.
-  // Opt-in only via BOT_AUTO_RESUME_ON_START=1.
-  if (String(process.env.BOT_AUTO_RESUME_ON_START || "") === "1") {
-    if (typeof botRouter.resumeContinuousBots === "function") {
-      try {
-        const r = await botRouter.resumeContinuousBots();
-        console.log(
-          `Resumed continuous bots: ${r?.resumed ?? 0} (pollMs=${
-            r?.pollMs ?? "?"
-          })`,
-        );
-      } catch (e) {
-        console.error("Failed to resume continuous bots:", e);
+  if (typeof botRouter.resumeContinuousBots === "function") {
+    try {
+      const r = await botRouter.resumeContinuousBots();
+      if (r?.resumed > 0) {
+        console.log(`Resumed ${r.resumed} continuous bot(s)`);
       }
+    } catch (e) {
+      console.error("Failed to resume continuous bots:", e);
     }
   }
 

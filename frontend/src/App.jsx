@@ -134,9 +134,8 @@ export default function App() {
     }
   }, [source]);
 
-  // After a backend deploy, bots are not auto-resumed by default.
-  // Once this client is on the latest version, resume the user's bot (if enabled)
-  // exactly once per page load.
+  // Once the client is on the latest version, resume all the user's enabled bots
+  // exactly once per page load (belt-and-suspenders on top of server-side auto-resume).
   useEffect(() => {
     const current = normalizeVersion7(APP_VERSION);
     const next = normalizeVersion7(serverVersion);
@@ -147,12 +146,8 @@ export default function App() {
     if (resumeAttemptedRef.current) return;
 
     resumeAttemptedRef.current = true;
-    apiPost(`/api/bot/resume?source=${encodeURIComponent(source)}`, {}).catch(
-      () => {
-        // ignore
-      },
-    );
-  }, [user, serverVersion, updateOpen, source]);
+    apiPost("/api/bot/resume", {}).catch(() => {});
+  }, [user, serverVersion, updateOpen]);
 
   // Detect a newly deployed app version and ask the user to refresh.
   // We intentionally do NOT force-refresh; the user chooses when to upgrade.
@@ -246,7 +241,7 @@ export default function App() {
     // Resume bot only when user accepts the new version.
     // (Backend is configured to NOT auto-resume bots on deploy by default.)
     try {
-      await apiPost(`/api/bot/resume?source=${encodeURIComponent(source)}`, {});
+      await apiPost("/api/bot/resume", {});
     } catch {
       // ignore
     }

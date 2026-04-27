@@ -1056,11 +1056,12 @@ async function runOnceForUser(userId, source = SOURCE_IAAI) {
       }
     }
 
-    const prevSeenSize = Object.keys(st.lastSeen || {}).length;
+    // Merge nextSeen into prevSeen so vehicles that temporarily fall out of
+    // the fetch window aren't forgotten and re-reported as NEW on return.
     const { changes, nextSeen } = diffVehicles(st.lastSeen || {}, vehicles);
-    st.lastSeen = nextSeen;
-    await saveLastSeen(userId, nextSeen, source);
-    console.log(`[bot-debug] ${source} user=${userId} prevSeen=${prevSeenSize} vehicles=${vehicles.length} changes=${changes.length}`);
+    const mergedSeen = { ...(st.lastSeen || {}), ...nextSeen };
+    st.lastSeen = mergedSeen;
+    await saveLastSeen(userId, mergedSeen, source);
 
     // For Copart: BIN-only first, then price range on BIN price, then odo/year.
     // For IAAI: bid range, then odo.
@@ -1096,7 +1097,6 @@ async function runOnceForUser(userId, source = SOURCE_IAAI) {
     }
 
     changesCount = filteredChanges.length;
-    console.log(`[bot-debug] ${source} user=${userId} filteredChanges=${filteredChanges.length} droppedBid=${droppedByBidRange} droppedOdo=${droppedByOdoRange} droppedYear=${droppedByYearRange} filters=${JSON.stringify({ min_bid: u?.min_bid, max_bid: u?.max_bid, odo_from: u?.odo_from, odo_to: u?.odo_to, year_from: u?.year_from, year_to: u?.year_to })}`);
 
     if (droppedByBidRange > 0) {
       st.lastOutput += ` | dropped ${droppedByBidRange} out-of-bid-range update(s)`;
