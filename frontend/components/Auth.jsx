@@ -32,7 +32,7 @@ export default function Auth({
   const [otpVerifying, setOtpVerifying] = useState(false);
   const [otpResendLeftSec, setOtpResendLeftSec] = useState(0);
 
-  // Forgot password flow
+  // Forgot password flow.
   const [fpOpen, setFpOpen] = useState(false);
   const [fpIdentifier, setFpIdentifier] = useState("");
   const [fpUsername, setFpUsername] = useState("");
