@@ -228,6 +228,27 @@ function unsubscribeFooterHtml(unsubscribeUrl) {
   `;
 }
 
+function extractInlineAttachments(html) {
+  const attachments = [];
+  let idx = 0;
+  const processedHtml = html.replace(
+    /src="(data:([^;]+);base64,([^"]+))"/g,
+    (_, _dataUri, mimeType, b64) => {
+      const cid = `img${idx++}@iaai-bot`;
+      const ext = mimeType.split("/")[1] || "jpg";
+      attachments.push({
+        content: b64,
+        type: mimeType,
+        filename: `image${idx}.${ext}`,
+        disposition: "inline",
+        content_id: cid,
+      });
+      return `src="cid:${cid}"`;
+    },
+  );
+  return { html: processedHtml, attachments };
+}
+
 async function sendVehiclesEmail({
   to,
   subject,
@@ -240,26 +261,21 @@ async function sendVehiclesEmail({
 
   sgMail.setApiKey(apiKey);
 
-  const htmlBody = `${vehiclesToHtml(vehicles, source)}${unsubscribeFooterHtml(
-    unsubscribeUrl,
-  )}`;
+  const rawHtml = `${vehiclesToHtml(vehicles, source)}${unsubscribeFooterHtml(unsubscribeUrl)}`;
+  const { html: htmlBody, attachments } = extractInlineAttachments(rawHtml);
 
   const listUnsub = String(unsubscribeUrl || "").trim();
   const headers = listUnsub
     ? {
-        // Many clients show an Unsubscribe UI when this header is present
         "List-Unsubscribe": `<${listUnsub}>`,
         "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
       }
     : undefined;
 
-  const [resp] = await sgMail.send({
-    to,
-    from,
-    subject,
-    html: htmlBody,
-    headers,
-  });
+  const msg = { to, from, subject, html: htmlBody, headers };
+  if (attachments.length > 0) msg.attachments = attachments;
+
+  const [resp] = await sgMail.send(msg);
 
   return {
     statusCode: resp?.statusCode ?? null,
