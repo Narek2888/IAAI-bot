@@ -17,6 +17,9 @@ async function fetchFreshSession() {
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--no-zygote",
         "--disable-blink-features=AutomationControlled",
       ],
     });
