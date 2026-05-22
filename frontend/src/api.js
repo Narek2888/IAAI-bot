@@ -97,3 +97,11 @@ export function apiGet(url) {
 export function apiPost(url, body) {
   return request("POST", url, body);
 }
+
+export function apiPut(url, body) {
+  return request("PUT", url, body);
+}
+
+export function apiDelete(url) {
+  return request("DELETE", url, undefined);
+}

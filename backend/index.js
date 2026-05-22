@@ -96,6 +96,7 @@ app.use(require("./unsubscribe"));
 
 app.use("/api/auth", require("./auth"));
 app.use("/api/filters", require("./filters"));
+app.use("/api/search-profiles", require("./searchProfiles"));
 const botRouter = require("./bot");
 app.use("/api/bot", botRouter);
 

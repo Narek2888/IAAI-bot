@@ -56,14 +56,21 @@ function getBotContinuousColumn(source) {
   return source === SOURCE_COPART ? "copart_bot_continuous" : "bot_continuous";
 }
 
-function getStateKey(userId, source) {
-  return `${userId}:${source}`;
+function getStateKey(userId, source, profileId = null) {
+  return profileId ? `${userId}:${source}:p:${profileId}` : `${userId}:${source}`;
 }
 
-// per-user, per-source bot state
+// per-user, per-source (per-profile) bot state
 const states = new Map();
 
-async function setBotContinuous(userId, enabled, source = SOURCE_IAAI) {
+async function setBotContinuous(userId, enabled, source = SOURCE_IAAI, profileId = null) {
+  if (profileId) {
+    await db.query(
+      "UPDATE search_profiles SET bot_continuous = $1 WHERE id = $2 AND user_id = $3",
+      [!!enabled, profileId, userId],
+    );
+    return;
+  }
   const column = getBotContinuousColumn(source);
   await db.query(`UPDATE users SET ${column} = $1 WHERE id = $2`, [
     !!enabled,
@@ -71,7 +78,14 @@ async function setBotContinuous(userId, enabled, source = SOURCE_IAAI) {
   ]);
 }
 
-async function getBotContinuous(userId, source = SOURCE_IAAI) {
+async function getBotContinuous(userId, source = SOURCE_IAAI, profileId = null) {
+  if (profileId) {
+    const r = await db.query(
+      "SELECT bot_continuous FROM search_profiles WHERE id = $1 AND user_id = $2 LIMIT 1",
+      [profileId, userId],
+    );
+    return r.rows[0] ? !!r.rows[0].bot_continuous : false;
+  }
   const column = getBotContinuousColumn(source);
   const r = await db.query(
     `SELECT ${column} FROM users WHERE id = $1 LIMIT 1`,
@@ -116,8 +130,8 @@ function hasAnyFiltersSet(u) {
   ].some((v) => v !== null && v !== undefined && String(v).trim() !== "");
 }
 
-function getState(userId, source = SOURCE_IAAI) {
-  const key = getStateKey(userId, source);
+function getState(userId, source = SOURCE_IAAI, profileId = null) {
+  const key = getStateKey(userId, source, profileId);
   if (!states.has(key)) {
     states.set(key, {
       running: false,
@@ -148,8 +162,11 @@ function getState(userId, source = SOURCE_IAAI) {
   return states.get(key);
 }
 
-async function resetLastSeenForUser(userId, source = null) {
-  const st = source ? getState(userId, source) : null;
+async function resetLastSeenForUser(userId, source = null, profileId = null) {
+  const lastSeenKey = source
+    ? (profileId ? `${source}:p:${profileId}` : source)
+    : null;
+  const st = source ? getState(userId, source, profileId) : null;
   if (st && st.inFlight) {
     st.pendingLastSeenReset = true;
     st.lastStatusJson = null;
@@ -169,8 +186,8 @@ async function resetLastSeenForUser(userId, source = null) {
   const raw = r.rows[0]?.last_seen;
   const data = raw && typeof raw === "object" ? raw : {};
 
-  if (source) {
-    data[source] = {};
+  if (lastSeenKey) {
+    data[lastSeenKey] = {};
   } else {
     for (const s of SUPPORTED_SOURCES) {
       data[s] = {};
@@ -188,29 +205,31 @@ async function resetLastSeenForUser(userId, source = null) {
   return { ok: true, source };
 }
 
-async function loadLastSeen(userId, source = SOURCE_IAAI) {
+async function loadLastSeen(userId, source = SOURCE_IAAI, profileId = null) {
   try {
+    const lastSeenKey = profileId ? `${source}:p:${profileId}` : source;
     const r = await db.query(
       "SELECT last_seen FROM bot_states WHERE user_id = $1 LIMIT 1",
       [userId],
     );
     const raw = r.rows[0]?.last_seen;
     const data = raw && typeof raw === "object" ? raw : {};
-    return data[source] && typeof data[source] === "object" ? data[source] : {};
+    return data[lastSeenKey] && typeof data[lastSeenKey] === "object" ? data[lastSeenKey] : {};
   } catch (e) {
     return {};
   }
 }
 
-async function saveLastSeen(userId, lastSeen, source = SOURCE_IAAI) {
+async function saveLastSeen(userId, lastSeen, source = SOURCE_IAAI, profileId = null) {
   try {
+    const lastSeenKey = profileId ? `${source}:p:${profileId}` : source;
     const r = await db.query(
       "SELECT last_seen FROM bot_states WHERE user_id = $1 LIMIT 1",
       [userId],
     );
     const raw = r.rows[0]?.last_seen;
     const data = raw && typeof raw === "object" ? raw : {};
-    data[source] = lastSeen || {};
+    data[lastSeenKey] = lastSeen || {};
     await db.query(
       `INSERT INTO bot_states (user_id, last_seen, updated_at)
        VALUES ($1, $2, NOW())
@@ -228,12 +247,13 @@ async function refreshContinuousState(
   st,
   source = SOURCE_IAAI,
   maxAgeMs = 5000,
+  profileId = null,
 ) {
   const now = Date.now();
   if (st.continuousEnabled !== null && now - st.lastContinuousAt < maxAgeMs) {
     return st.continuousEnabled;
   }
-  const enabled = await getBotContinuous(userId, source);
+  const enabled = await getBotContinuous(userId, source, profileId);
   st.continuousEnabled = enabled;
   st.lastContinuousAt = now;
   return enabled;
@@ -646,7 +666,18 @@ function extractVehiclesFromCopartResponse(resp, maxItems = 500) {
   return { vehicles, totalElements };
 }
 
-async function fetchUserFilters(userId, source = SOURCE_IAAI) {
+async function fetchUserFilters(userId, source = SOURCE_IAAI, profileId = null) {
+  if (profileId) {
+    const r = await db.query(
+      `SELECT profile_name AS filter_name, full_search, year_from, year_to,
+              auction_type, inventory_type, inventory_types, fuel_type, fuel_types,
+              min_bid, max_bid, odo_from, odo_to
+       FROM search_profiles
+       WHERE id = $1 AND user_id = $2`,
+      [profileId, userId],
+    );
+    return r.rows[0] || null;
+  }
   const prefix = source === SOURCE_COPART ? "copart_" : "";
   const r = await db.query(
     `SELECT
@@ -669,7 +700,19 @@ async function fetchUserFilters(userId, source = SOURCE_IAAI) {
   return r.rows[0] || null;
 }
 
-async function fetchUserBotSettings(userId, source = SOURCE_IAAI) {
+async function fetchUserBotSettings(userId, source = SOURCE_IAAI, profileId = null) {
+  if (profileId) {
+    const userRow = await db.query("SELECT email FROM users WHERE id = $1", [userId]);
+    const profileRow = await db.query(
+      `SELECT bot_continuous, profile_name AS filter_name, full_search,
+              year_from, year_to, auction_type, inventory_type, inventory_types,
+              fuel_type, fuel_types, min_bid, max_bid, odo_from, odo_to
+       FROM search_profiles WHERE id = $1 AND user_id = $2`,
+      [profileId, userId],
+    );
+    if (!profileRow.rows[0]) return null;
+    return { ...profileRow.rows[0], email: userRow.rows[0]?.email || null };
+  }
   const prefix = source === SOURCE_COPART ? "copart_" : "";
   const r = await db.query(
     `SELECT
@@ -694,13 +737,13 @@ async function fetchUserBotSettings(userId, source = SOURCE_IAAI) {
   return r.rows[0] || null;
 }
 
-async function startContinuousForUser(userId, source = SOURCE_IAAI) {
-  const st = getState(userId, source);
+async function startContinuousForUser(userId, source = SOURCE_IAAI, profileId = null) {
+  const st = getState(userId, source, profileId);
 
   // Idempotent: if already running, do nothing
   if (st.running && st.timer) return;
 
-  const filters = await fetchUserFilters(userId, source);
+  const filters = await fetchUserFilters(userId, source, profileId);
   if (!hasAnyFiltersSet(filters)) {
     st.running = false;
     if (st.timer) clearInterval(st.timer);
@@ -714,11 +757,11 @@ async function startContinuousForUser(userId, source = SOURCE_IAAI) {
   st.running = true;
 
   // Run immediately once, then schedule
-  await runOnceForUser(userId, source);
+  await runOnceForUser(userId, source, profileId);
 
   const pollMs = Number(process.env.BOT_POLL_MS || 10 * 60 * 1000);
   st.timer = setInterval(() => {
-    runOnceForUser(userId, source).catch((e) => {
+    runOnceForUser(userId, source, profileId).catch((e) => {
       console.error("Bot interval error:", e);
       st.lastRunAt = Date.now();
       st.lastOutput = `${source} error: ${e?.message || "unknown error"}`;
@@ -733,11 +776,16 @@ async function startContinuousForUser(userId, source = SOURCE_IAAI) {
   if (typeof st.timer.unref === "function") st.timer.unref();
 }
 
-function stopContinuousForUser(userId, source = SOURCE_IAAI) {
-  const st = getState(userId, source);
+function stopContinuousForUser(userId, source = SOURCE_IAAI, profileId = null) {
+  const st = getState(userId, source, profileId);
   st.running = false;
   if (st.timer) clearInterval(st.timer);
   st.timer = null;
+}
+
+// Exported alias used by searchProfiles.js on delete
+function stopProfileBot(userId, source, profileId) {
+  stopContinuousForUser(userId, source, profileId);
 }
 
 function summarizeResponse(resp, source) {
@@ -865,8 +913,8 @@ async function fetchVehiclesPaged({
   };
 }
 
-async function runOnceForUser(userId, source = SOURCE_IAAI) {
-  const st = getState(userId, source);
+async function runOnceForUser(userId, source = SOURCE_IAAI, profileId = null) {
+  const st = getState(userId, source, profileId);
 
   let changesCount = 0;
   let emailed = false;
@@ -885,11 +933,11 @@ async function runOnceForUser(userId, source = SOURCE_IAAI) {
     st.pendingLastSeenReset = false;
     st.lastSeen = {};
     st.lastSeenLoaded = true;
-    await saveLastSeen(userId, {}, source);
+    await saveLastSeen(userId, {}, source, profileId);
   }
 
   if (!st.lastSeenLoaded) {
-    st.lastSeen = await loadLastSeen(userId, source);
+    st.lastSeen = await loadLastSeen(userId, source, profileId);
     st.lastSeenLoaded = true;
   }
 
@@ -900,7 +948,7 @@ async function runOnceForUser(userId, source = SOURCE_IAAI) {
 
   st.inFlight = true;
   try {
-    const u = await fetchUserFilters(userId, source);
+    const u = await fetchUserFilters(userId, source, profileId);
     st.lastUserFilters = u || null;
 
     let payload;
@@ -1061,7 +1109,7 @@ async function runOnceForUser(userId, source = SOURCE_IAAI) {
     const { changes, nextSeen } = diffVehicles(st.lastSeen || {}, vehicles);
     const mergedSeen = { ...(st.lastSeen || {}), ...nextSeen };
     st.lastSeen = mergedSeen;
-    await saveLastSeen(userId, mergedSeen, source);
+    await saveLastSeen(userId, mergedSeen, source, profileId);
 
     // For Copart: BIN-only first, then price range on BIN price, then odo/year.
     // For IAAI: bid range, then odo.
@@ -1241,7 +1289,8 @@ router.get("/status", authRequired, async (req, res) => {
   const source = req.query.source
     ? normalizeAuctionSource(req.query.source)
     : SOURCE_IAAI;
-  const st = getState(userId, source);
+  const profileId = req.query.profileId ? parseInt(req.query.profileId, 10) || null : null;
+  const st = getState(userId, source, profileId);
   const debug = String(req.query.debug || "") === "1";
 
   // Coalesce frequent status calls (e.g. refresh + polling)
@@ -1262,7 +1311,7 @@ router.get("/status", authRequired, async (req, res) => {
   // Include persisted preference for UI (survives restarts/deploys)
   let continuousEnabled = st.continuousEnabled;
   try {
-    continuousEnabled = await refreshContinuousState(userId, st, source);
+    continuousEnabled = await refreshContinuousState(userId, st, source, 5000, profileId);
   } catch (e) {
     // Don't fail status if DB read fails; just omit preference.
     console.error("Failed to read bot_continuous:", e);
@@ -1306,9 +1355,10 @@ router.get("/settings", authRequired, async (req, res) => {
     const source = req.query.source
       ? normalizeAuctionSource(req.query.source)
       : SOURCE_IAAI;
-    const st = getState(userId, source);
+    const profileId = req.query.profileId ? parseInt(req.query.profileId, 10) || null : null;
+    const st = getState(userId, source, profileId);
 
-    const row = await fetchUserBotSettings(userId, source);
+    const row = await fetchUserBotSettings(userId, source, profileId);
     const continuousEnabled = !!row?.bot_continuous;
     const filtersSet = hasAnyFiltersSet(row || null);
     const hasEmail = !!(row?.email && String(row.email).trim());
@@ -1337,12 +1387,13 @@ router.post("/run", authRequired, async (req, res) => {
   const source = req.query.source
     ? normalizeAuctionSource(req.query.source)
     : SOURCE_IAAI;
+  const profileId = req.query.profileId ? parseInt(req.query.profileId, 10) || null : null;
   const userId = req.user.id;
-  const st = getState(userId, source);
+  const st = getState(userId, source, profileId);
 
   try {
     if (mode === "once") {
-      const r = await runOnceForUser(userId, source);
+      const r = await runOnceForUser(userId, source, profileId);
       return res.json({
         ok: true,
         source,
@@ -1354,13 +1405,13 @@ router.post("/run", authRequired, async (req, res) => {
     }
 
     if (mode === "start") {
-      await setBotContinuous(userId, true, source);
+      await setBotContinuous(userId, true, source, profileId);
       st.continuousEnabled = true;
       st.lastContinuousAt = Date.now();
       st.lastStatusJson = null;
 
       const alreadyRunning = !!(st.running && st.timer);
-      await startContinuousForUser(userId, source);
+      await startContinuousForUser(userId, source, profileId);
 
       const pollMs = Number(process.env.BOT_POLL_MS || 10 * 60 * 1000);
       return res.json({
@@ -1373,11 +1424,11 @@ router.post("/run", authRequired, async (req, res) => {
     }
 
     if (mode === "stop") {
-      await setBotContinuous(userId, false, source);
+      await setBotContinuous(userId, false, source, profileId);
       st.continuousEnabled = false;
       st.lastContinuousAt = Date.now();
       st.lastStatusJson = null;
-      stopContinuousForUser(userId, source);
+      stopContinuousForUser(userId, source, profileId);
       return res.json({ ok: true, source });
     }
 
@@ -1440,14 +1491,14 @@ router.post("/test-email", authRequired, async (req, res) => {
 router.resumeContinuousBots = async function resumeContinuousBots() {
   const pollMs = Number(process.env.BOT_POLL_MS || 10 * 60 * 1000);
 
+  let resumed = 0;
+
+  // 1) Legacy bots stored in users table (kept for backward compat)
   const r = await db.query(
     "SELECT id, bot_continuous, copart_bot_continuous FROM users WHERE bot_continuous = true OR copart_bot_continuous = true ORDER BY id",
   );
-
   const rows = r.rows;
-  if (rows.length === 0) return { resumed: 0, pollMs };
 
-  // If any user has Copart bot enabled, pre-warm cookies now so the first poll is instant
   if (rows.some((row) => row.copart_bot_continuous)) {
     const { ensureSession } = require("./copartScraper");
     ensureSession().catch((e) =>
@@ -1455,26 +1506,48 @@ router.resumeContinuousBots = async function resumeContinuousBots() {
     );
   }
 
-  let resumed = 0;
   for (const row of rows) {
     const userId = row.id;
     for (const source of SUPPORTED_SOURCES) {
       const enabled =
-        source === SOURCE_COPART
-          ? row.copart_bot_continuous
-          : row.bot_continuous;
+        source === SOURCE_COPART ? row.copart_bot_continuous : row.bot_continuous;
       if (!enabled) continue;
-
       try {
         await startContinuousForUser(userId, source);
         const st = getState(userId, source);
         if (st.running && st.timer) resumed += 1;
       } catch (e) {
-        console.error("Failed to resume bot for user", userId, source, e);
+        console.error("Failed to resume legacy bot for user", userId, source, e);
         const st = getState(userId, source);
         st.lastRunAt = Date.now();
         st.lastOutput = `Resume failed: ${e?.message || "unknown error"}`;
       }
+    }
+  }
+
+  // 2) Profile-based bots stored in search_profiles table
+  const profileRows = await db.query(
+    "SELECT id, user_id, source FROM search_profiles WHERE bot_continuous = true ORDER BY id",
+  );
+
+  if (profileRows.rows.some((row) => row.source === SOURCE_COPART)) {
+    const { ensureSession } = require("./copartScraper");
+    ensureSession().catch((e) =>
+      console.error("[copart-scraper] profile pre-warm failed:", e.message),
+    );
+  }
+
+  for (const row of profileRows.rows) {
+    const { id: profileId, user_id: userId, source } = row;
+    try {
+      await startContinuousForUser(userId, source, profileId);
+      const st = getState(userId, source, profileId);
+      if (st.running && st.timer) resumed += 1;
+    } catch (e) {
+      console.error("Failed to resume profile bot", userId, source, profileId, e);
+      const st = getState(userId, source, profileId);
+      st.lastRunAt = Date.now();
+      st.lastOutput = `Resume failed: ${e?.message || "unknown error"}`;
     }
   }
 
@@ -1484,6 +1557,7 @@ router.resumeContinuousBots = async function resumeContinuousBots() {
 // Allow other routes (e.g. filters save) to clear the per-user seen cache.
 // This is NOT done during normal polling; it only happens when explicitly called.
 router.resetLastSeenForUser = resetLastSeenForUser;
+router.stopProfileBot = stopProfileBot;
 
 function isMeaningful(v) {
   if (v == null) return false;
