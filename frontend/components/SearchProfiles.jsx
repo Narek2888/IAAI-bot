@@ -61,7 +61,7 @@ function profileToForm(p) {
   };
 }
 
-function formToPayload(form) {
+function formToPayload(form, isCopart = false) {
   const yearFrom = String(form.year_from || "").trim() || DEFAULT_YEAR_FROM;
   const yearTo = String(form.year_to || "").trim() || DEFAULT_YEAR_TO;
   const minBid = String(form.min_bid || "").trim() || DEFAULT_MIN_BID;
@@ -74,7 +74,7 @@ function formToPayload(form) {
     full_search: String(form.full_search || "").trim() || null,
     year_from: toNumberOrNull(yearFrom),
     year_to: toNumberOrNull(yearTo),
-    auction_type: form.auction_type || null,
+    auction_type: isCopart ? "Buy Now" : (form.auction_type || null),
     inventory_type: form.inventory_types?.[0] || null,
     inventory_types: form.inventory_types?.length ? form.inventory_types : null,
     fuel_types: form.fuel_types?.length ? form.fuel_types : null,
@@ -152,18 +152,6 @@ function FilterForm({ form, onChange, onInventoryTypeToggle, onFuelTypeToggle, i
             onBlur={onYearBlur}
           />
         </label>
-        {isCopart && (
-          <label style={{ display: "flex", gap: 8, alignItems: "center", cursor: "pointer", paddingBottom: 6, whiteSpace: "nowrap" }}>
-            <input
-              type="checkbox"
-              checked={form.auction_type === "Buy Now"}
-              onChange={(e) =>
-                onChange({ target: { name: "auction_type", value: e.target.checked ? "Buy Now" : "" } })
-              }
-            />
-            <span>Buy Now only</span>
-          </label>
-        )}
       </div>
 
       {!isCopart && (
@@ -300,7 +288,7 @@ function ProfileModal({ source, profile, onClose, onSaved }) {
     setSaving(true);
     setError("");
     try {
-      const payload = formToPayload(form);
+      const payload = formToPayload(form, isCopart);
       let r;
       if (isNew) {
         r = await apiPost(`/api/search-profiles?source=${encodeURIComponent(source)}`, payload);
