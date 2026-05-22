@@ -136,6 +136,7 @@ function getState(userId, source = SOURCE_IAAI, profileId = null) {
     states.set(key, {
       running: false,
       inFlight: false,
+      queued: false,
       lastOutput: null,
       lastRunAt: null,
       timer: null,
@@ -204,6 +205,77 @@ async function resetLastSeenForUser(userId, source = null, profileId = null) {
 
   return { ok: true, source };
 }
+
+// ── Per-platform sequential request queue ─────────────────────────────────────
+// Ensures only one IAAI request and one Copart request run at a time.
+// Prevents concurrent session conflicts on Copart and reduces ban risk on IAAI.
+
+const MIN_QUEUE_GAP_MS = Number(process.env.BOT_QUEUE_GAP_MS || 15 * 1000);
+
+const platformQueues = new Map(); // source -> { running, jobs, lastFinishedAt }
+
+function getPlatformQueue(source) {
+  if (!platformQueues.has(source)) {
+    platformQueues.set(source, { running: false, jobs: [], lastFinishedAt: 0 });
+  }
+  return platformQueues.get(source);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function drainQueue(source) {
+  const pq = getPlatformQueue(source);
+  if (pq.running) return;
+  pq.running = true;
+
+  while (pq.jobs.length > 0) {
+    // Enforce minimum gap between consecutive polls
+    if (pq.lastFinishedAt > 0) {
+      const gap = Date.now() - pq.lastFinishedAt;
+      if (gap < MIN_QUEUE_GAP_MS) {
+        await sleep(MIN_QUEUE_GAP_MS - gap);
+      }
+    }
+
+    const { fn, resolve, reject } = pq.jobs.shift();
+    try {
+      resolve(await fn());
+    } catch (e) {
+      reject(e);
+    }
+    pq.lastFinishedAt = Date.now();
+  }
+
+  pq.running = false;
+}
+
+// Enqueue a runOnce job for a profile. Returns a promise that resolves with the
+// run result. Skips silently if the profile is already queued or in-flight.
+function enqueueRun(userId, source, profileId) {
+  const st = getState(userId, source, profileId);
+
+  if (st.queued || st.inFlight) {
+    return Promise.resolve({ response: st.lastResponse, changesCount: 0, emailed: false });
+  }
+
+  st.queued = true;
+
+  return new Promise((resolve, reject) => {
+    const pq = getPlatformQueue(source);
+    pq.jobs.push({
+      fn: async () => {
+        st.queued = false;
+        return runOnceForUser(userId, source, profileId);
+      },
+      resolve,
+      reject,
+    });
+    drainQueue(source).catch((e) => console.error("[queue] drain error:", e));
+  });
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 async function loadLastSeen(userId, source = SOURCE_IAAI, profileId = null) {
   try {
@@ -756,12 +828,16 @@ async function startContinuousForUser(userId, source = SOURCE_IAAI, profileId = 
   if (st.timer) clearInterval(st.timer);
   st.running = true;
 
-  // Run immediately once, then schedule
-  await runOnceForUser(userId, source, profileId);
+  // Queue the first run immediately, then schedule subsequent ones via the queue
+  enqueueRun(userId, source, profileId).catch((e) => {
+    console.error("Bot initial run error:", e);
+    st.lastRunAt = Date.now();
+    st.lastOutput = `${source} error: ${e?.message || "unknown error"}`;
+  });
 
   const pollMs = Number(process.env.BOT_POLL_MS || 10 * 60 * 1000);
   st.timer = setInterval(() => {
-    runOnceForUser(userId, source, profileId).catch((e) => {
+    enqueueRun(userId, source, profileId).catch((e) => {
       console.error("Bot interval error:", e);
       st.lastRunAt = Date.now();
       st.lastOutput = `${source} error: ${e?.message || "unknown error"}`;
@@ -1393,7 +1469,7 @@ router.post("/run", authRequired, async (req, res) => {
 
   try {
     if (mode === "once") {
-      const r = await runOnceForUser(userId, source, profileId);
+      const r = await enqueueRun(userId, source, profileId);
       return res.json({
         ok: true,
         source,
