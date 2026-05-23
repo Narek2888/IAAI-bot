@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import Auth from "../components/Auth";
-import Filters from "../components/Filters";
-import Bot from "../components/Bot";
+import SearchProfiles from "../components/SearchProfiles";
 import { apiGet, apiPost, loadTokenFromStorage, setAuthToken } from "./api";
 
 const USER_KEY = "user";
@@ -65,7 +64,7 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [registerModalOpen, setRegisterModalOpen] = useState(false);
-  const [hasTypeErrors, setHasTypeErrors] = useState(false);
+
   const [accountModalOpen, setAccountModalOpen] = useState(false);
   const [accountSection, setAccountSection] = useState("password"); // "password" | "email" | "delete"
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -1564,8 +1563,7 @@ export default function App() {
           </div>
         </div>
 
-        <Filters source={source} onTypeErrorsChange={setHasTypeErrors} />
-        <Bot source={source} disabled={hasTypeErrors} />
+        <SearchProfiles source={source} />
       </div>
       {renderUpdateModal()}
       <VersionRow version={APP_VERSION} />
