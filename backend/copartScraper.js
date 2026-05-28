@@ -19,6 +19,7 @@ async function openSession() {
       "--disable-dev-shm-usage",
       "--disable-gpu",
       "--no-zygote",
+      "--single-process",
       "--disable-crash-reporter",
       "--disable-blink-features=AutomationControlled",
     ],

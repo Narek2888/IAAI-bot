@@ -13,7 +13,7 @@
     "db:up": "docker compose up -d db",
     "db:down": "docker compose down",
     "db:logs": "docker compose logs -f db",
-    "start": "node backend/index.js",
+    "start": "bash start.sh",
     "build": "npm --prefix frontend install && npm --prefix frontend run build",
     "migrate": "node backend/migrate.js",
     "test": "jest --runInBand"

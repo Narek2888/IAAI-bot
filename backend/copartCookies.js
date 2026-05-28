@@ -20,6 +20,7 @@ async function fetchFreshSession() {
         "--disable-dev-shm-usage",
         "--disable-gpu",
         "--no-zygote",
+        "--single-process",
         "--disable-blink-features=AutomationControlled",
       ],
     });
