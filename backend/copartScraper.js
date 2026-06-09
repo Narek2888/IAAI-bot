@@ -4,6 +4,8 @@ const StealthPlugin = require("puppeteer-extra-plugin-stealth");
 puppeteerExtra.use(StealthPlugin());
 
 const SESSION_TTL_MS = 25 * 60 * 1000; // 25 minutes
+const MAX_LAUNCH_RETRIES = 10;
+const RETRY_BASE_DELAY_MS = 3000;
 
 let browser = null;
 let page = null;
@@ -21,6 +23,7 @@ async function openSession() {
       "--no-zygote",
       "--single-process",
       "--disable-crash-reporter",
+      "--disable-crashpad",
       "--disable-blink-features=AutomationControlled",
     ],
   });
@@ -59,8 +62,28 @@ async function ensureSession() {
       if (browser) await browser.close().catch(() => {});
       browser = null;
       page = null;
-      console.log("[copart-scraper] Starting browser session...");
-      await openSession();
+
+      let lastErr;
+      for (let attempt = 1; attempt <= MAX_LAUNCH_RETRIES; attempt++) {
+        try {
+          console.log(`[copart-scraper] Starting browser session (attempt ${attempt}/${MAX_LAUNCH_RETRIES})...`);
+          await openSession();
+          return;
+        } catch (e) {
+          lastErr = e;
+          console.error(`[copart-scraper] Launch attempt ${attempt}/${MAX_LAUNCH_RETRIES} failed: ${e.message}`);
+          browser = null;
+          page = null;
+          if (attempt < MAX_LAUNCH_RETRIES) {
+            const delay = RETRY_BASE_DELAY_MS * attempt;
+            console.log(`[copart-scraper] Retrying in ${delay / 1000}s...`);
+            await new Promise((r) => setTimeout(r, delay));
+          }
+        }
+      }
+
+      console.error("[copart-scraper] All launch attempts exhausted, giving up.");
+      throw lastErr;
     } finally {
       initPromise = null;
     }
