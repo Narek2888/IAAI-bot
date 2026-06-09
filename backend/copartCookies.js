@@ -21,6 +21,8 @@ async function fetchFreshSession() {
         "--disable-gpu",
         "--no-zygote",
         "--single-process",
+        "--disable-crash-reporter",
+        "--disable-crashpad",
         "--disable-blink-features=AutomationControlled",
       ],
     });
