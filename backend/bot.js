@@ -158,6 +158,9 @@ function getState(userId, source = SOURCE_IAAI, profileId = null) {
       lastRequest: null,
       lastResponse: null,
       lastUserFilters: null,
+
+      lastChangesCount: 0,
+      lastEmailed: false,
     });
   }
   return states.get(key);
@@ -1236,6 +1239,43 @@ async function runOnceForUser(userId, source = SOURCE_IAAI, profileId = null) {
     }
 
     if (filteredChanges.length > 0) {
+      // Persist detected changes to DB so the frontend can display them
+      try {
+        for (const v of filteredChanges) {
+          await db.query(
+            `INSERT INTO vehicle_changes
+               (user_id, source, profile_id, stock_id, vehicle_link, title, price, old_price,
+                year, odometer, image, buy_it_now, change_type)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+            [
+              userId, source, profileId || null,
+              v.stock_id || null,
+              v.vehicle_link || null,
+              v.title || null,
+              v.price || null,
+              v.old_price || null,
+              parseInt(v.year, 10) || null,
+              v.odometer || null,
+              extractImgSrc(v.image) || null,
+              !!v.buy_it_now,
+              v.changeType || "NEW",
+            ],
+          );
+        }
+        // Keep only the 500 most recent records per bot context to prevent unbounded growth
+        await db.query(
+          `DELETE FROM vehicle_changes WHERE id IN (
+             SELECT id FROM vehicle_changes
+             WHERE user_id = $1 AND source = $2 AND profile_id IS NOT DISTINCT FROM $3
+             ORDER BY detected_at DESC
+             OFFSET 500
+           )`,
+          [userId, source, profileId || null],
+        );
+      } catch (e) {
+        console.error("[bot] failed to persist vehicle changes:", e.message);
+      }
+
       const userRes = await db.query(
         "SELECT email, username, email_unsubscribed, unsubscribe_token FROM users WHERE id = $1",
         [userId],
@@ -1320,9 +1360,12 @@ async function runOnceForUser(userId, source = SOURCE_IAAI, profileId = null) {
       }
     }
 
+    st.lastChangesCount = changesCount;
+    st.lastEmailed = emailed;
     return { response: st.lastResponse, changesCount, emailed };
   } finally {
     st.inFlight = false;
+    st.lastStatusJson = null; // invalidate cache so next status poll reflects the completed run
   }
 }
 
@@ -1401,6 +1444,8 @@ router.get("/status", authRequired, async (req, res) => {
       continuousEnabled,
       lastOutput: st.lastOutput,
       lastRunAt: st.lastRunAt,
+      lastChangesCount: st.lastChangesCount ?? 0,
+      lastEmailed: st.lastEmailed ?? false,
       ...(debug
         ? {
             lastUserFilters: st.lastUserFilters,
@@ -1469,15 +1514,14 @@ router.post("/run", authRequired, async (req, res) => {
 
   try {
     if (mode === "once") {
-      const r = await enqueueRun(userId, source, profileId);
-      return res.json({
-        ok: true,
-        source,
-        response: r.response,
-        changesCount: r.changesCount,
-        emailed: !!r.emailed,
-        lastOutput: st.lastOutput,
+      st.lastStatusJson = null; // allow immediate fresh status polls while running
+      enqueueRun(userId, source, profileId).catch((e) => {
+        console.error("Bot one-shot run error:", e);
+        st.lastRunAt = Date.now();
+        st.lastOutput = `${source} error: ${e?.message || "unknown error"}`;
+        st.lastStatusJson = null;
       });
+      return res.json({ ok: true, source, queued: true });
     }
 
     if (mode === "start") {
@@ -1559,6 +1603,35 @@ router.post("/test-email", authRequired, async (req, res) => {
       msg: e?.message || "Failed to send test email",
       details,
     });
+  }
+});
+
+// GET /api/bot/vehicles — returns recent vehicle changes detected by the bot
+router.get("/vehicles", authRequired, async (req, res) => {
+  const userId = req.user.id;
+  const source = req.query.source
+    ? normalizeAuctionSource(req.query.source)
+    : SOURCE_IAAI;
+  const profileId = req.query.profileId
+    ? parseInt(req.query.profileId, 10) || null
+    : null;
+  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 50));
+  const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
+
+  try {
+    const r = await db.query(
+      `SELECT id, source, stock_id, vehicle_link, title, price, old_price,
+              year, odometer, image, buy_it_now, change_type, detected_at
+       FROM vehicle_changes
+       WHERE user_id = $1 AND source = $2 AND profile_id IS NOT DISTINCT FROM $3
+       ORDER BY detected_at DESC
+       LIMIT $4 OFFSET $5`,
+      [userId, source, profileId, limit, offset],
+    );
+    return res.json({ ok: true, vehicles: r.rows });
+  } catch (e) {
+    console.error("[vehicles] query error:", e);
+    return res.status(500).json({ ok: false, msg: "Server error" });
   }
 });
 

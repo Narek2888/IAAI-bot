@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { apiGet, apiPost } from "../src/api";
+import VehiclesPanel from "./VehiclesPanel";
 
 export default function Bot({ source = "IAAI", disabled = false }) {
   const [bot, setBot] = useState({
@@ -85,7 +86,6 @@ export default function Bot({ source = "IAAI", disabled = false }) {
   const runOnce = async () => {
     if (runOnceBusy) return;
 
-    // Open popup immediately, show spinner while working.
     setRunOnceSuccessOpen(true);
     setRunOnceLoading(true);
     setRunOnceHasEmail(null);
@@ -98,6 +98,14 @@ export default function Bot({ source = "IAAI", disabled = false }) {
     const startedAt = Date.now();
 
     try {
+      // Snapshot current lastRunAt so we know when a new run finishes
+      let prevRunAt = null;
+      try {
+        const before = await apiGet(`/api/bot/status?source=${encodeURIComponent(source)}`);
+        prevRunAt = before?.bot?.lastRunAt ?? null;
+      } catch { /* ignore */ }
+
+      // Kick off the run — server responds immediately, scrape runs in background
       const r = await apiPost(
         `/api/bot/run?mode=once&source=${encodeURIComponent(source)}`,
       );
@@ -111,18 +119,28 @@ export default function Bot({ source = "IAAI", disabled = false }) {
         return alert(r?.msg || "Failed");
       }
 
-      const c = Number(r?.changesCount);
-      setRunOnceChangesCount(Number.isFinite(c) ? c : 0);
-
-      if (typeof r?.emailed === "boolean") setRunOnceEmailed(r.emailed);
-      if (r?.lastOutput) setRunOnceLastOutput(String(r.lastOutput));
+      // Poll status until lastRunAt changes (meaning the background run finished)
+      const maxWaitMs = 120_000;
+      const pollIntervalMs = 2000;
+      while (Date.now() - startedAt < maxWaitMs) {
+        await new Promise((res) => setTimeout(res, pollIntervalMs));
+        try {
+          const status = await apiGet(`/api/bot/status?source=${encodeURIComponent(source)}`);
+          const curRunAt = status?.bot?.lastRunAt ?? null;
+          if (curRunAt !== null && curRunAt !== prevRunAt) {
+            const c = Number(status?.bot?.lastChangesCount);
+            setRunOnceChangesCount(Number.isFinite(c) ? c : 0);
+            if (typeof status?.bot?.lastEmailed === "boolean") setRunOnceEmailed(status.bot.lastEmailed);
+            if (status?.bot?.lastOutput) setRunOnceLastOutput(String(status.bot.lastOutput));
+            break;
+          }
+        } catch { /* keep polling */ }
+      }
 
       try {
         const settings = await apiGet(`/api/bot/settings?source=${encodeURIComponent(source)}`);
-        const hasEmail = !!(settings?.ok && settings?.bot?.hasEmail);
-        setRunOnceHasEmail(hasEmail);
+        setRunOnceHasEmail(!!(settings?.ok && settings?.bot?.hasEmail));
       } catch {
-        // If we can't verify, treat as not configured to avoid misleading message.
         setRunOnceHasEmail(false);
       }
 
@@ -274,6 +292,8 @@ export default function Bot({ source = "IAAI", disabled = false }) {
           </div>
         </div>
       )}
+
+      <VehiclesPanel source={source} refreshKey={bot.lastRunAt} />
     </div>
   );
 }
