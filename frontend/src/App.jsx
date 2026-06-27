@@ -713,7 +713,7 @@ export default function App() {
   if (!user)
     return (
       <>
-        <div style={{ maxWidth: 900, margin: "24px auto", paddingBottom: 44 }}>
+        <div style={{ maxWidth: 900, margin: "24px auto", padding: "0 16px 44px" }}>
           <header
             style={{
               display: "flex",
@@ -895,7 +895,7 @@ export default function App() {
 
   return (
     <>
-      <div style={{ maxWidth: 900, margin: "24px auto", paddingBottom: 44 }}>
+      <div style={{ maxWidth: 900, margin: "24px auto", padding: "0 16px 44px" }}>
         <header
           style={{
             display: "flex",
