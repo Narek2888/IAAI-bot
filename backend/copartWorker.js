@@ -28,7 +28,6 @@ let initPromise = null;
 async function openSession() {
   browser = await puppeteerExtra.launch({
     args: CHROME_ARGS,
-    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || "chromium",
     headless: true,
   });
 

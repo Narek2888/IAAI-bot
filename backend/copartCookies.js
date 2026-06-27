@@ -26,7 +26,6 @@ async function fetchFreshSession() {
   try {
     browser = await puppeteerExtra.launch({
       args: CHROME_ARGS,
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || "chromium",
       headless: true,
     });
 
