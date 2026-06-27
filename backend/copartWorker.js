@@ -1,5 +1,6 @@
 const puppeteerExtra = require("puppeteer-extra");
 const StealthPlugin = require("puppeteer-extra-plugin-stealth");
+const chromium = require("@sparticuz/chromium");
 const axios = require("axios");
 
 puppeteerExtra.use(StealthPlugin());
@@ -15,18 +16,9 @@ let initPromise = null;
 
 async function openSession() {
   browser = await puppeteerExtra.launch({
-    headless: true,
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-gpu",
-      "--no-zygote",
-      "--single-process",
-      "--disable-crash-reporter",
-      "--disable-crashpad",
-      "--disable-blink-features=AutomationControlled",
-    ],
+    args: [...chromium.args, "--disable-blink-features=AutomationControlled"],
+    executablePath: await chromium.executablePath(),
+    headless: chromium.headless,
   });
 
   page = await browser.newPage();
