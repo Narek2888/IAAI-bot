@@ -1,8 +1,19 @@
 const puppeteerExtra = require("puppeteer-extra");
 const StealthPlugin = require("puppeteer-extra-plugin-stealth");
-const chromium = require("@sparticuz/chromium");
 
 puppeteerExtra.use(StealthPlugin());
+
+const CHROME_ARGS = [
+  "--no-sandbox",
+  "--disable-setuid-sandbox",
+  "--disable-dev-shm-usage",
+  "--disable-gpu",
+  "--no-zygote",
+  "--single-process",
+  "--disable-crash-reporter",
+  "--disable-crashpad",
+  "--disable-blink-features=AutomationControlled",
+];
 
 const CACHE_TTL_MS = 25 * 60 * 1000; // 25 minutes
 
@@ -14,9 +25,9 @@ async function fetchFreshSession() {
   let browser;
   try {
     browser = await puppeteerExtra.launch({
-      args: [...chromium.args, "--disable-blink-features=AutomationControlled"],
-      executablePath: await chromium.executablePath(),
-      headless: chromium.headless,
+      args: CHROME_ARGS,
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || "chromium",
+      headless: true,
     });
 
     const page = await browser.newPage();

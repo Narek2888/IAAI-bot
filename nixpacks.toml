@@ -5,7 +5,7 @@
 
 [phases.setup]
 # Needed for native deps like better-sqlite3 on Linux
-nixPkgs = ["python3", "gcc", "gnumake", "git"]
+nixPkgs = ["python3", "gcc", "gnumake", "git", "chromium"]
 
 [phases.install]
 cmds = [
