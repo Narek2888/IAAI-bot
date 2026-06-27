@@ -1,9 +1,20 @@
 const puppeteerExtra = require("puppeteer-extra");
 const StealthPlugin = require("puppeteer-extra-plugin-stealth");
-const chromium = require("@sparticuz/chromium");
 const axios = require("axios");
 
 puppeteerExtra.use(StealthPlugin());
+
+const CHROME_ARGS = [
+  "--no-sandbox",
+  "--disable-setuid-sandbox",
+  "--disable-dev-shm-usage",
+  "--disable-gpu",
+  "--no-zygote",
+  "--single-process",
+  "--disable-crash-reporter",
+  "--disable-crashpad",
+  "--disable-blink-features=AutomationControlled",
+];
 
 const SESSION_TTL_MS = 25 * 60 * 1000;
 const MAX_LAUNCH_RETRIES = 10;
@@ -16,9 +27,9 @@ let initPromise = null;
 
 async function openSession() {
   browser = await puppeteerExtra.launch({
-    args: [...chromium.args, "--disable-blink-features=AutomationControlled"],
-    executablePath: await chromium.executablePath(),
-    headless: chromium.headless,
+    args: CHROME_ARGS,
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || "chromium",
+    headless: true,
   });
 
   page = await browser.newPage();
