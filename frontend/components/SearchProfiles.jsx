@@ -733,6 +733,7 @@ function ProfileCard({ source, profile, onEdit, onDelete }) {
         padding: 16,
         background: "#fff",
         boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+        overflow: "hidden",
       }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
           <div style={{ fontWeight: 600, fontSize: 15 }}>
